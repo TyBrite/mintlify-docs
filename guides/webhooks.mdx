@@ -1,0 +1,122 @@
+---
+title: "Receive Realtime Events with TLDP Webhooks"
+sidebarTitle: "Webhooks"
+description: "Set up webhook endpoints, verify signatures, and reliably handle TLDP events for orders, shipments, payments, and returns in realtime."
+---
+
+Webhooks push events to your server the moment something changes in TLDP — no polling required. When a shipment is delivered, a return is approved, or a payment is settled, TLDP sends an HTTP `POST` request to your registered endpoint with a signed event payload. This guide walks you through registering an endpoint, verifying event authenticity, and handling events reliably in production.
+
+<Steps>
+  <Step title="Subscribe an endpoint">
+    Register your server's URL and declare the event types you want to receive. You can subscribe to as many event types as you need in a single call.
+
+    ```typescript
+    const endpoint = await client.webhooks.createWebhook({
+      requestBody: {
+        url: 'https://yourapp.com/webhooks/tldp',
+        events: ['shipment.delivered', 'order.fulfilled', 'return.refunded'],
+      },
+    });
+    console.log(endpoint.signing_secret);
+    ```
+  </Step>
+
+  <Step title="Store the signing secret">
+    The `signing_secret` is returned **only once** at registration time and is never exposed again through the API.
+
+    <Warning>
+      Copy and store the `signing_secret` immediately after calling `createWebhook`. You will need it to verify every incoming event payload. If you lose it, you must delete the webhook and create a new one.
+    </Warning>
+
+    Store the secret in an environment variable or a secrets manager — never commit it to source control.
+  </Step>
+
+  <Step title="Receive events">
+    TLDP sends a `POST` request to your endpoint with a JSON body structured as a standard event envelope. Every event shares this shape regardless of type.
+
+    ```json
+    {
+      "id": "evt_4f2c...",
+      "type": "shipment.delivered",
+      "created": "2026-06-08T10:30:00Z",
+      "api_version": "v1",
+      "livemode": true,
+      "data": {
+        "object": {
+          "id": "...",
+          "tracking_number": "TLDP-20260608-0001",
+          "status": "delivered"
+        }
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Verify the signature">
+    TLDP signs every request with your `signing_secret` and includes a `TLDP-Signature` header of the form `t=<timestamp>,v1=<hex>`. Verify this signature before processing any event to guard against spoofed payloads.
+
+    ```typescript
+    import crypto from 'crypto';
+
+    function verifyWebhook(rawBody: string, header: string, secret: string): boolean {
+      const parts = Object.fromEntries(header.split(',').map((p) => p.split('=')));
+      const expected = crypto
+        .createHmac('sha256', secret)
+        .update(`${parts.t}.${rawBody}`)
+        .digest('hex');
+      return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(parts.v1));
+    }
+    ```
+
+    Pass the raw (unparsed) request body, the full `TLDP-Signature` header value, and your stored secret. Returning `false` means the payload has been tampered with or the wrong secret was used — discard the request.
+  </Step>
+
+  <Step title="Respond 2xx quickly">
+    Return a `200 OK` (or any `2xx` status) as soon as you have verified and acknowledged the event. TLDP treats anything other than a `2xx` response as a failure and will retry.
+
+    Perform any heavy processing — database writes, downstream API calls, email notifications — asynchronously after you have responded, using a queue or background job.
+  </Step>
+</Steps>
+
+## Event types
+
+TLDP emits events across four groups. Subscribe only to the events your integration needs.
+
+| Group | Events |
+|---|---|
+| Orders | `order.created`, `order.fulfilled`, `order.cancelled` |
+| Shipments | `shipment.created`, `shipment.payment_confirmed`, `shipment.assigned`, `shipment.picked_up`, `shipment.in_transit`, `shipment.out_for_delivery`, `shipment.delivered`, `shipment.failed`, `shipment.cancelled` |
+| Payments | `payment.pending_settlement`, `payment.settled` |
+| Returns | `return.requested`, `return.approved`, `return.rejected`, `return.received`, `return.refunded`, `return.exchanged` |
+
+## Reliability
+
+<Accordion title="Retries and exponential backoff">
+  If your endpoint returns a non-`2xx` response or times out, TLDP automatically retries the delivery using exponential backoff. Ensure your endpoint responds promptly — even if you defer processing — so retries are not triggered unnecessarily.
+</Accordion>
+
+<Accordion title="Idempotency — deduplicate on event.id">
+  TLDP guarantees at-least-once delivery, which means the same event may arrive more than once under failure conditions. Use the `event.id` field as a unique key to deduplicate: record each processed ID in your database and skip events you have already handled.
+</Accordion>
+
+<Accordion title="Auto-disable after repeated failures">
+  If your endpoint fails repeatedly over a sustained period, TLDP automatically disables it to prevent unnecessary traffic. Once your endpoint is healthy again, re-enable it from the dashboard or by creating a new webhook registration. Use `testWebhook` to confirm delivery before going live.
+</Accordion>
+
+## Test your endpoint
+
+Send a synthetic test event to your endpoint at any time to confirm it is reachable and processing correctly.
+
+```typescript
+await client.webhooks.testWebhook({ webhookId: endpoint.id });
+```
+
+You can also clean up unused endpoints with `deleteWebhook`.
+
+```typescript
+await client.webhooks.deleteWebhook({ webhookId: endpoint.id });
+```
+
+<Tip>
+  Check the `livemode` field on every incoming event. When `livemode` is `false`, the event was triggered from a test environment or via `testWebhook`. Guard your live business logic — payment processing, order fulfilment, customer notifications — behind a `livemode === true` check to prevent test events from causing unintended side effects.
+</Tip>

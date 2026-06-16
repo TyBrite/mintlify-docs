@@ -1,0 +1,137 @@
+---
+title: "TrackingService: Public and Detailed Shipment Tracking"
+sidebarTitle: "Tracking"
+description: "Use client.tracking for public customer-facing shipment status or detailed backend event history — each method requires a different API key type."
+---
+
+`client.tracking` provides two distinct tracking methods designed for different contexts. `trackShipment` is intended for customer-facing use — it returns a sanitised public view of the shipment status and can be called with a publishable key. `getShipmentTracking` is for backend use — it returns the full event history with timestamps, locations, and status codes, and requires a secret key.
+
+<Tip>
+  For real-time updates without polling, subscribe to shipment webhook events such as `shipment.out_for_delivery` and `shipment.delivered`. See the [Webhooks](/sdk/webhooks) page for setup instructions.
+</Tip>
+
+## Methods
+
+### `trackShipment`
+
+Look up the current status of a shipment using its public tracking number. This method is safe to call from a customer-facing context — it returns only the information appropriate for end-customer consumption. The endpoint is edge-cached (~15 seconds) and ETag-validated; send the returned `ETag` back as `If-None-Match` to receive a `304` when the status has not changed.
+
+<Note>
+  This is a public endpoint — it works with a publishable key (`tybrite_pk_*`), so you can safely build a "track my order" page in the browser without exposing a secret key.
+</Note>
+
+<ParamField query="trackingNumber" type="string" required>
+  The public tracking number assigned to the shipment (e.g. `TLDP-20260608-0001`). Available in the shipment response as the `tracking_number` field.
+</ParamField>
+
+```typescript
+import { TLDP } from '@tybrite-labs/tldp-sdk';
+
+// Initialise with a publishable key for customer-facing tracking
+const client = new TLDP({ apiKey: 'tybrite_pk_live_YOUR_PUBLISHABLE_KEY' });
+
+const status = await client.tracking.trackShipment({
+  trackingNumber: 'TLDP-20260608-0001',
+});
+
+console.log(status.tracking_number);    // 'TLDP-20260608-0001'
+console.log(status.status);             // 'out_for_delivery'
+console.log(status.estimated_delivery); // '2026-06-09T14:00:00Z'
+console.log(status.courier);            // 'Fargo Courier'
+console.log(status.recipient.name);     // 'Amina N.'
+console.log(status.recipient.city);     // 'Mombasa'
+
+status.events.forEach((event) => {
+  console.log(event.timestamp, event.status, event.description, event.location);
+});
+```
+
+---
+
+## Public Tracking Fields
+
+The `trackShipment` response returns a `PublicTracking` object with the following fields.
+
+| Field | Type | Description |
+|---|---|---|
+| `tracking_number` | `string` | The shipment's public tracking number |
+| `status` | `ShipmentStatus` | The current shipment status |
+| `estimated_delivery` | `string` | ISO 8601 estimated delivery timestamp |
+| `recipient` | `{ name: string; city: string }` | Recipient name and city — address details are redacted for privacy |
+| `courier` | `string` | The name of the assigned courier |
+| `events` | `TrackingEvent[]` | Chronological list of tracking events |
+
+---
+
+### `getShipmentTracking`
+
+Retrieve the full event history for a shipment by its internal ID. This method requires a secret key and is intended for server-side use — for example, to display a detailed timeline in an operations dashboard or to audit delivery performance.
+
+<Warning>
+  This requires a **secret key** because it returns the complete history for a shipment in your account. Do not call it from the browser — use `trackShipment` for public-facing pages.
+</Warning>
+
+<ParamField query="shipmentId" type="string" required>
+  The internal shipment ID (e.g. `shp_abc123`), not the public tracking number.
+</ParamField>
+
+```typescript
+import { TLDP } from '@tybrite-labs/tldp-sdk';
+
+// Initialise with a secret key for backend tracking
+const client = new TLDP({ apiKey: 'tybrite_sk_live_YOUR_SECRET_KEY' });
+
+const { events } = await client.tracking.getShipmentTracking({
+  shipmentId: 'shp_abc123',
+});
+
+events.forEach((event) => {
+  console.log(event.timestamp, event.status, event.description, event.location);
+});
+```
+
+---
+
+## TrackingEvent Fields
+
+Each event in the `events` array represents a discrete status change in the shipment's journey.
+
+| Field | Type | Description |
+|---|---|---|
+| `timestamp` | `string` | ISO 8601 datetime when the status change occurred |
+| `status` | `string` | The shipment status at this point in the journey |
+| `description` | `string` | Human-readable description of the event (e.g. `"Parcel received at Nairobi hub"`) |
+| `location` | `string` | The city or facility where the event occurred |
+
+---
+
+## Shipment Status Values
+
+Both tracking methods return a `status` field using the following enumerated values. All values are lowercase strings.
+
+| Status | Description |
+|---|---|
+| `pending` | Order or shipment created; awaiting payment or assignment |
+| `payment_confirmed` | Payment accepted; courier assignment is in progress |
+| `assigned` | A courier has been assigned to collect the parcel |
+| `picked_up` | Courier has collected the parcel from the sender |
+| `in_transit` | Parcel is moving through the courier network |
+| `out_for_delivery` | Courier is en route to deliver the parcel to the recipient |
+| `delivered` | Parcel has been successfully delivered |
+| `cancelled` | Shipment was cancelled before delivery |
+| `failed` | Delivery attempt failed (e.g. recipient unavailable) |
+
+---
+
+## Cancellation
+
+Each call to `trackShipment` or `getShipmentTracking` returns a `CancelablePromise`. Call `.cancel()` to abort an in-flight request — useful in polling loops or when a component unmounts before the request completes.
+
+```typescript
+const promise = client.tracking.trackShipment({
+  trackingNumber: 'TLDP-20260608-0001',
+});
+
+// Cancel the in-flight request if needed
+promise.cancel();
+```

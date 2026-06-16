@@ -1,0 +1,48 @@
+---
+title: "Retrieve Proof of Delivery for TLDP Shipments"
+sidebarTitle: "Proof of Delivery"
+description: "Fetch and verify proof-of-delivery records for delivered shipments, including photo, OTP, and signature evidence captured at the point of handoff."
+---
+
+Once a shipment is delivered, TLDP captures a proof of delivery (POD) record at the point of handoff. Depending on the courier and delivery method, this evidence takes one of three forms: a photo of the delivered parcel, an OTP code confirmed by the recipient, or a digital signature. You can retrieve this record at any time after delivery to verify that handoff occurred correctly and to resolve any disputes.
+
+## POD types
+
+| Type | Description |
+|---|---|
+| `photo` | A photograph of the parcel at the delivery location, captured by the courier |
+| `otp` | A one-time passcode sent to the recipient and confirmed verbally or digitally at handoff |
+| `signature` | A digital signature captured from the recipient at the point of delivery |
+
+## Retrieve a proof of delivery record
+
+Call `getProofOfDelivery` with the shipment ID to fetch the full POD record, including the type of evidence and the raw proof data.
+
+```typescript
+const pod = await client.proofOfDelivery.getProofOfDelivery({ shipmentId: 'shp_abc123' });
+console.log(pod.pod.type);        // 'photo' | 'otp' | 'signature'
+console.log(pod.pod.verified_at); // ISO 8601 timestamp of verification
+```
+
+## Response fields
+
+| Field | Type | Description |
+|---|---|---|
+| `shipment_id` | string | The ID of the shipment this POD belongs to |
+| `tracking_number` | string | The human-readable tracking number for the shipment |
+| `delivered_at` | string | ISO 8601 timestamp of when the shipment was delivered |
+| `pod.type` | string | The type of proof captured — `photo`, `otp`, or `signature` |
+| `pod.verified_at` | string | ISO 8601 timestamp of when the proof was verified |
+| `pod.data` | object | The raw proof data — for example, a photo URL or a signature image |
+
+<Note>
+  Proof of delivery is only available after a shipment reaches `DELIVERED` status. Calling `getProofOfDelivery` on an in-transit or pending shipment will return a `404` error. Check the shipment status before querying for POD records.
+</Note>
+
+<Note>
+  OTP codes are never returned in the `pod.data` field. For OTP-verified deliveries, `pod.data` confirms that the code was verified, but the code itself is not exposed through the API.
+</Note>
+
+<Tip>
+  Subscribe to the `shipment.delivered` webhook event to receive an instant notification the moment a shipment is delivered and a POD record becomes available. This eliminates the need to poll for delivery status. See the [Webhooks guide](/guides/webhooks) to set up your endpoint.
+</Tip>

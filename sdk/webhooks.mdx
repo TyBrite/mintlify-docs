@@ -1,0 +1,145 @@
+---
+title: "WebhooksService: Subscribe to Platform Events | TLDP"
+sidebarTitle: "Webhooks"
+description: "Use client.webhooks to create, list, test, and delete webhook endpoints that receive real-time TLDP order, shipment, payment, and return events."
+---
+
+`client.webhooks` manages your webhook endpoint subscriptions. You register a URL and a list of events you want to receive; TLDP delivers a signed HTTP POST to that URL whenever a matching event occurs. Use webhooks to drive real-time order status updates, trigger fulfilment workflows, or reconcile payments without polling.
+
+<Tip>
+  For the complete guide to verifying webhook signatures, handling retries, and building a reliable event consumer, see the [Webhooks guide](/guides/webhooks).
+</Tip>
+
+## Methods
+
+### `createWebhook`
+
+Register a new webhook endpoint. Provide your HTTPS URL and the list of event types you want to subscribe to. The response includes a `signing_secret` that you must store securely — it is returned only once.
+
+<ParamField body="url" type="string" required>
+  The HTTPS URL that TLDP should deliver event payloads to. Must be publicly reachable.
+</ParamField>
+
+<ParamField body="events" type="WebhookEvent[]" required>
+  The list of event types to subscribe to. Provide one or more values from the [event types table](#available-event-types) below.
+</ParamField>
+
+<ParamField body="description" type="string">
+  A human-readable label for this endpoint. Optional.
+</ParamField>
+
+<Warning>
+  The `signing_secret` is returned **only once** in the `createWebhook` response. Store it immediately in a secure secrets manager (e.g. AWS Secrets Manager, HashiCorp Vault, or an environment variable). You cannot retrieve it again — if you lose it, you must delete the endpoint and create a new one.
+</Warning>
+
+```typescript
+import { TLDP } from '@tybrite-labs/tldp-sdk';
+
+const client = new TLDP({ apiKey: 'tybrite_sk_live_YOUR_SECRET_KEY' });
+
+const { webhook } = await client.webhooks.createWebhook({
+  requestBody: {
+    url: 'https://yourapp.com/webhooks/tldp',
+    events: [
+      'shipment.delivered',
+      'order.fulfilled',
+      'return.refunded',
+    ],
+    description: 'Production fulfilment listener',
+  },
+});
+
+console.log(webhook.id);             // 'wh_abc123'
+console.log(webhook.url);            // 'https://yourapp.com/webhooks/tldp'
+console.log(webhook.signing_secret); // 'whsec_...' — save this immediately
+```
+
+---
+
+### `listWebhooks`
+
+Retrieve all webhook endpoints registered on your account. The `signing_secret` is **not** included in list responses.
+
+```typescript
+const { webhooks } = await client.webhooks.listWebhooks();
+
+webhooks.forEach((wh) => {
+  console.log(wh.id, wh.url, wh.events);
+});
+```
+
+---
+
+### `deleteWebhook`
+
+Remove a webhook endpoint permanently. TLDP stops delivering events to the endpoint immediately. Deletion cannot be undone.
+
+```typescript
+await client.webhooks.deleteWebhook({ webhookId: 'wh_abc123' });
+```
+
+---
+
+### `testWebhook`
+
+Send a synthetic test event to a registered endpoint. Use this to verify that your server is reachable, correctly parsing the payload, and returning a `2xx` response before going live.
+
+```typescript
+const result = await client.webhooks.testWebhook({ webhookId: 'wh_abc123' });
+// TLDP delivers a test payload to your endpoint URL
+// Check your server logs to confirm receipt
+```
+
+---
+
+## Available Event Types
+
+Subscribe to any combination of the following events. Pass their string values in the `events` array when creating a webhook.
+
+### Orders
+
+| Event | Description |
+|---|---|
+| `order.created` | A new order has been created |
+| `order.fulfilled` | An order has been fulfilled and converted into a shipment |
+| `order.cancelled` | An order has been cancelled |
+
+### Shipments
+
+| Event | Description |
+|---|---|
+| `shipment.created` | A new shipment has been created |
+| `shipment.payment_confirmed` | Payment for the shipment has been confirmed |
+| `shipment.assigned` | A courier has been assigned to the shipment |
+| `shipment.picked_up` | The courier has collected the parcel |
+| `shipment.in_transit` | The parcel is moving through the courier network |
+| `shipment.out_for_delivery` | The courier is en route to deliver the parcel |
+| `shipment.delivered` | The parcel has been successfully delivered |
+| `shipment.failed` | A delivery attempt has failed |
+| `shipment.cancelled` | The shipment has been cancelled |
+
+### Payments
+
+| Event | Description |
+|---|---|
+| `payment.pending_settlement` | Payment has been processed and is awaiting settlement |
+| `payment.settled` | Payment has been fully settled |
+
+### Returns
+
+| Event | Description |
+|---|---|
+| `return.requested` | A return has been requested by the customer |
+| `return.approved` | The return request has been approved |
+| `return.rejected` | The return request has been rejected |
+| `return.received` | The returned item has been received at the warehouse |
+| `return.refunded` | A refund has been issued for the return |
+| `return.exchanged` | An exchange has been dispatched for the return |
+
+---
+
+## Delivery Contract
+
+- **At-least-once delivery** — make your handler idempotent and deduplicate on the event id.
+- **Signed** — verify every delivery with the `signing_secret` from `createWebhook` before acting on it.
+- **Respond fast** — return `2xx` quickly and do heavy work asynchronously; slow responses are treated as failures and retried.

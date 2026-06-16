@@ -1,0 +1,152 @@
+---
+title: "RatesService: Courier Quotes and Delivery Zones | TLDP"
+sidebarTitle: "Rates"
+description: "Use client.rates to fetch competitive courier quotes for any route and list all supported delivery zones across the TLDP courier network."
+---
+
+`client.rates` returns competitive quotes from all your enabled couriers for a given origin–destination pair. You use these quotes to present pricing options to customers, then pass the chosen `rate_quote_id` to `fulfilOrder` or `createShipment` to lock in that price and book the courier. You can also list all delivery zones supported by the TLDP network.
+
+## Methods
+
+### `calculateRates`
+
+Fetch courier quotes for a route. Provide origin and destination cities along with the parcel weight. Optionally filter results to a specific service level — omit `service_level` to receive quotes for all available service levels at once. The 10% platform commission is already included in `total_price`. Each `quote_id` is valid for 2 minutes and is required to create a shipment.
+
+<Note>
+  Each quote exposes its id as `quote_id`. When you later fulfil the order or create a shipment, pass that value under the key `rate_quote_id`. Read `quote.quote_id`, send it as `rate_quote_id`.
+</Note>
+
+<ParamField body="origin" type="{ city: string; zone?: string }" required>
+  The pickup location. Provide the city name matching a TLDP-supported zone. Optionally include `zone` for sub-city precision.
+</ParamField>
+
+<ParamField body="destination" type="{ city: string; zone?: string }" required>
+  The delivery destination. Provide the city name matching a TLDP-supported zone. Optionally include `zone`.
+</ParamField>
+
+<ParamField body="weight_kg" type="number" required>
+  The gross weight of the parcel in kilograms. Used to calculate weight surcharges.
+</ParamField>
+
+<ParamField body="declared_value" type="number">
+  Declared monetary value of the contents. Used for insurance and liability calculations. Optional.
+</ParamField>
+
+<ParamField body="service_level" type="ServiceLevel">
+  Optional. Filter results to a single service level. Omit to receive all available quotes across all service levels.
+</ParamField>
+
+<ParamField body="special_flags" type="string[]">
+  Optional flags such as `'fragile'` that may affect routing or surcharges.
+</ParamField>
+
+```typescript
+import { TLDP } from '@tybrite-labs/tldp-sdk';
+
+const client = new TLDP({ apiKey: 'tybrite_sk_test_YOUR_KEY' });
+
+// Get quotes for all service levels
+const { quotes, meta } = await client.rates.calculateRates({
+  requestBody: {
+    origin: { city: 'Nairobi', zone: 'CBD' },
+    destination: { city: 'Mombasa', zone: 'Nyali' },
+    weight_kg: 2.5,
+    declared_value: 4500,
+  },
+});
+
+// Filter to a specific service level
+const { quotes: expressQuotes } = await client.rates.calculateRates({
+  requestBody: {
+    origin: { city: 'Nairobi' },
+    destination: { city: 'Mombasa' },
+    weight_kg: 2.5,
+    service_level: 'express',
+  },
+});
+
+quotes.forEach((quote) => {
+  console.log(
+    quote.courier_name,
+    quote.service_level,
+    quote.total_price,
+    quote.currency,
+    quote.valid_until,
+  );
+});
+
+// Pick the cheapest quote and fulfil:
+const cheapest = quotes.sort((a, b) => a.total_price - b.total_price)[0];
+// Pass cheapest.quote_id as rate_quote_id to fulfilOrder or createShipment
+```
+
+<Warning>
+  Quotes are time-bound. Once `valid_until` passes, re-run `calculateRates` before fulfilling — a stale `rate_quote_id` will be rejected.
+</Warning>
+
+---
+
+## Quote Fields
+
+Each object in the `quotes` array contains the following fields.
+
+| Field | Type | Description |
+|---|---|---|
+| `quote_id` | `string` | The unique ID for this quote. Pass it as `rate_quote_id` when fulfilling an order or creating a shipment |
+| `courier_id` | `string` | The unique ID of the courier providing this rate |
+| `courier_name` | `string` | The name of the courier providing this rate |
+| `courier_tier` | `'bronze' \| 'silver' \| 'gold'` | Courier classification within the TLDP network |
+| `service_level` | `ServiceLevel` | The service level for this quote (e.g. `standard`, `express`) |
+| `total_price` | `number` | Total amount charged for this shipment, inclusive of the platform fee |
+| `currency` | `string` | ISO 4217 currency code (e.g. `KES`, `NGN`, `GHS`) |
+| `estimated_delivery_hours` | `number` | Expected transit time in hours |
+| `estimated_delivery_date` | `string` | Expected delivery date |
+| `valid_until` | `string` | ISO 8601 timestamp after which this quote can no longer be used |
+
+<Note>
+  The `quote_id` returned here maps directly to the `rate_quote_id` parameter expected by `client.orders.fulfilOrder()` and `client.shipments.createShipment()`. Store it alongside your order state so it is available at fulfilment time.
+</Note>
+
+---
+
+## Price Breakdown Fields
+
+Each quote also includes a `breakdown` object with a granular breakdown of how the total price is calculated.
+
+| Field | Type | Description |
+|---|---|---|
+| `base_rate` | `number` | The courier's flat base rate for the route |
+| `weight_surcharge` | `number` | Additional charge applied based on the parcel weight |
+| `zone_addon` | `number` | Surcharge for delivering to or from a remote or extended zone |
+| `service_multiplier` | `number` | Multiplier applied for premium service levels (e.g. `1.5` for express) |
+| `special_surcharges` | `array` | Line-item surcharges for special flags such as `fragile` |
+| `courier_subtotal` | `number` | Courier total before the platform fee |
+| `platform_fee` | `number` | TLDP platform fee included in the total price |
+
+---
+
+### `listZones`
+
+Retrieve all delivery zones currently supported by the TLDP network. The response is edge-cached (~5 minutes) and ETag-validated. Use this to validate city names before calling `calculateRates`, or to build a location selector in your checkout flow.
+
+```typescript
+const zones = await client.rates.listZones();
+
+for (const z of zones.zones ?? []) {
+  console.log(z.city, z.zones);
+}
+```
+
+---
+
+## Service Levels
+
+TLDP supports five service levels across the courier network. Availability varies by route. Pass the lowercase string value when filtering `calculateRates`.
+
+| Service Level | Value | Description |
+|---|---|---|
+| Economy | `economy` | Lowest cost; best for non-urgent, lightweight items |
+| Standard | `standard` | Balanced cost and speed; the default for most shipments |
+| Express | `express` | Fast delivery; ideal for time-sensitive items |
+| Same Day | `same_day` | Delivery within hours; available in select city pairs |
+| Overnight | `overnight` | Guaranteed next-morning delivery for qualifying routes |

@@ -1,0 +1,119 @@
+{
+  "projectType": "api-service",
+  "projectName": "TLDP — Tybrite Logistics Developer Platform",
+  "projectDescription": "A unified REST API and TypeScript SDK for quoting, shipping, tracking, and managing returns across multiple African courier networks.",
+  "theme": "luma",
+  "primaryColor": "#1be39b",
+  "lightColor": "#0c8c5c",
+  "darkColor": "#040404",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Docs",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "authentication"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/keys-and-environments",
+              "concepts/orders-and-shipments",
+              "concepts/rates-and-service-levels",
+              "concepts/tracking-lifecycle"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/create-a-shipment",
+              "guides/manage-returns",
+              "guides/proof-of-delivery",
+              "guides/webhooks"
+            ]
+          },
+          {
+            "group": "TypeScript SDK",
+            "pages": [
+              "sdk/introduction",
+              "sdk/orders",
+              "sdk/shipments",
+              "sdk/rates",
+              "sdk/tracking",
+              "sdk/returns",
+              "sdk/webhooks",
+              "sdk/proof-of-delivery"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api-reference/introduction"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Multi-courier rate quoting for Africa (economy, standard, express, same-day, overnight)",
+    "Order creation and fulfilment with last-mile or station-pickup delivery methods",
+    "Direct shipment creation bypassing the order layer",
+    "Real-time shipment tracking and status events",
+    "Proof of delivery capture (photo, OTP, signature)",
+    "Returns and exchanges lifecycle management",
+    "Webhook subscriptions with HMAC-SHA256 signature verification",
+    "Sandbox (test) environment fully isolated from production",
+    "Idempotency support on all write requests",
+    "Auto-retry with exponential backoff built into the TypeScript SDK"
+  ],
+  "publicApiSurface": [
+    "POST /v1/rates/calculate",
+    "GET /v1/rates/zones",
+    "POST /v1/orders",
+    "GET /v1/orders",
+    "GET /v1/orders/{orderId}",
+    "PATCH /v1/orders/{orderId}",
+    "POST /v1/orders/{orderId}/cancel",
+    "POST /v1/orders/{orderId}/fulfil",
+    "GET /v1/orders/{orderId}/on-demand-quote",
+    "POST /v1/orders/{orderId}/fulfil-on-demand",
+    "POST /v1/shipments",
+    "GET /v1/shipments/{shipmentId}",
+    "POST /v1/shipments/{shipmentId}/cancel",
+    "GET /v1/tracking/{trackingNumber}",
+    "GET /v1/shipments/{shipmentId}/tracking",
+    "GET /v1/pod/{shipmentId}",
+    "POST /v1/returns",
+    "GET /v1/returns",
+    "GET /v1/returns/{returnId}",
+    "POST /v1/returns/{returnId}/approve",
+    "POST /v1/returns/{returnId}/reject",
+    "POST /v1/returns/{returnId}/receive",
+    "POST /v1/returns/{returnId}/resolve",
+    "POST /v1/webhooks",
+    "GET /v1/webhooks",
+    "DELETE /v1/webhooks/{webhookId}",
+    "POST /v1/webhooks/{webhookId}/test",
+    "GET /v1/health",
+    "TLDP client class (TypeScript SDK)",
+    "OrdersService: createOrder, getOrder, updateOrder, cancelOrder, fulfilOrder, onDemandQuote, fulfilOrderOnDemand",
+    "ShipmentsService: createShipment, getShipment, cancelShipment",
+    "RatesService: calculateRates, listZones",
+    "TrackingService: trackShipment, getShipmentTracking",
+    "ProofOfDeliveryService: getProofOfDelivery",
+    "ReturnsService: requestReturn, getReturn, approveReturn, rejectReturn, receiveReturn, resolveReturn",
+    "WebhooksService: createWebhook, listWebhooks, deleteWebhook, testWebhook",
+    "SystemService: getApiInfo, getHealth"
+  ]
+}

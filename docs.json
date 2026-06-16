@@ -1,0 +1,91 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "name": "TLDP Docs",
+  "theme": "luma",
+  "colors": {
+    "primary": "#1be39b",
+    "light": "#0c8c5c",
+    "dark": "#040404"
+  },
+  "logo": {
+    "light": "https://media.brand.dev/c2ac8bb2-e752-4dff-ae87-539ff23415e2.svg",
+    "dark": "https://media.brand.dev/c2ac8bb2-e752-4dff-ae87-539ff23415e2.svg"
+  },
+  "favicon": "https://media.brand.dev/26d46f3d-dd05-44da-865d-61a4f9c59cdb.jpg",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Docs",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "authentication"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/keys-and-environments",
+              "concepts/orders-and-shipments",
+              "concepts/rates-and-service-levels",
+              "concepts/tracking-lifecycle"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/create-a-shipment",
+              "guides/manage-returns",
+              "guides/proof-of-delivery",
+              "guides/webhooks"
+            ]
+          },
+          {
+            "group": "TypeScript SDK",
+            "pages": [
+              "sdk/introduction",
+              "sdk/orders",
+              "sdk/shipments",
+              "sdk/rates",
+              "sdk/tracking",
+              "sdk/returns",
+              "sdk/webhooks",
+              "sdk/proof-of-delivery"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api-reference/introduction"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "npm",
+        "href": "https://www.npmjs.com/package/@tybrite-labs/tldp-sdk"
+      }
+    ],
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/TyBrite"
+    }
+  },
+  "footer": {
+    "socials": {
+      "website": "https://tldp.tybritelabs.com"
+    }
+  }
+}

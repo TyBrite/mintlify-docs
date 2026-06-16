@@ -1,0 +1,194 @@
+---
+title: "TLDP TypeScript SDK: Fully Typed Logistics Client"
+sidebarTitle: "Introduction"
+description: "Install and configure @tybrite-labs/tldp-sdk — a fully typed TypeScript client for the TLDP REST API covering orders, shipments, tracking, and more."
+---
+
+The `@tybrite-labs/tldp-sdk` package is a fully typed TypeScript client for the TLDP (Tybrite Logistics Developer Platform) API. It provides strongly typed service classes for every resource — orders, shipments, rates, tracking, returns, webhooks, proof of delivery, and system — so you can build African logistics workflows with confidence and minimal boilerplate.
+
+## Installation
+
+Install the SDK using your preferred package manager.
+
+<CodeGroup>
+
+```bash npm
+npm install @tybrite-labs/tldp-sdk
+```
+
+```bash pnpm
+pnpm add @tybrite-labs/tldp-sdk
+```
+
+```bash yarn
+yarn add @tybrite-labs/tldp-sdk
+```
+
+</CodeGroup>
+
+## Initialize the Client
+
+Import the `TLDP` class and create a client instance with your API key. Keep your secret key out of client-side bundles — initialize the client in a server-side or backend context only.
+
+```typescript
+import { TLDP } from '@tybrite-labs/tldp-sdk';
+
+const client = new TLDP({ apiKey: 'tybrite_sk_test_YOUR_KEY' });
+```
+
+The constructor accepts a `Partial<OpenAPIConfig>` object with the following options:
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `apiKey` | `string` | — | Your TLDP API key (required) |
+| `BASE` | `string` | `https://api.tybritelabs.com` | Base URL for all requests |
+| `VERSION` | `string` | `1.0.0` | API version string sent with requests |
+| `WITH_CREDENTIALS` | `boolean` | `false` | Whether to include credentials in cross-origin requests |
+| `CREDENTIALS` | `'include' \| 'omit' \| 'same-origin'` | `'include'` | Credentials mode for the underlying `fetch` call |
+| `USERNAME` | `string` | — | HTTP Basic Auth username (alternative to `apiKey`) |
+| `PASSWORD` | `string` | — | HTTP Basic Auth password (alternative to `apiKey`) |
+| `HEADERS` | `object` | — | Additional headers to attach to every request |
+| `ENCODE_PATH` | `function` | — | Custom path-segment encoder function |
+| `MAX_RETRIES` | `number` | `2` | Maximum number of automatic retry attempts |
+| `RETRY_DELAY_MS` | `number` | `500` | Initial delay in milliseconds before the first retry |
+
+## Available Services
+
+Once you have a client instance, access each resource through its dedicated service property.
+
+| Service | Property | What it does |
+|---|---|---|
+| Orders | `client.orders` | Create, fulfil, update, and cancel orders through the full order lifecycle |
+| Shipments | `client.shipments` | Create and manage shipments directly, bypassing the order layer |
+| Rates | `client.rates` | Fetch competitive courier quotes and list delivery zones |
+| Tracking | `client.tracking` | Track shipments publicly (customer-facing) or in detail (backend) |
+| Returns | `client.returns` | Request and manage the full returns and exchanges lifecycle |
+| Webhooks | `client.webhooks` | Create, list, test, and delete webhook endpoint subscriptions |
+| Proof of Delivery | `client.proofOfDelivery` | Retrieve photo, OTP, or signature proof for delivered shipments |
+| System | `client.system` | Health checks and platform-level diagnostics |
+
+## Error Handling
+
+Every service method throws an `ApiError` when the API returns a non-2xx response. Import `ApiError` alongside `TLDP` and wrap calls in a `try/catch` block to handle errors gracefully.
+
+```typescript
+import { TLDP, ApiError } from '@tybrite-labs/tldp-sdk';
+
+const client = new TLDP({ apiKey: 'tybrite_sk_test_YOUR_KEY' });
+
+try {
+  const { order } = await client.orders.createOrder({
+    requestBody: {
+      reference: 'ORDER-1042',
+      delivery_method: 'last_mile',
+      recipient: { name: 'Amina N.', phone: '+254700000000', city: 'Mombasa' },
+      item: { description: 'Books', weight_kg: 2.5 },
+    },
+  });
+  console.log('Created order:', order.id);
+} catch (err) {
+  if (err instanceof ApiError) {
+    // err.status is the HTTP status code, e.g. 400, 404, 422
+    // err.body contains the structured error payload
+    console.error(err.status, err.body);
+    // Example: 404, { error: { code: 'not_found', message: 'Order not found' } }
+  }
+}
+```
+
+`ApiError` exposes the following fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `url` | `string` | The URL of the failed request |
+| `status` | `number` | HTTP status code (e.g. `400`, `404`, `500`) |
+| `statusText` | `string` | HTTP status text (e.g. `"Bad Request"`) |
+| `body` | `any` | The parsed response body from the API |
+| `request` | `ApiRequestOptions` | The original request options that triggered the error |
+
+## Cancellation
+
+Every service method returns a `CancelablePromise`. Call `.cancel()` on the returned promise to abort the in-flight request — useful for debounced search inputs, timeout logic, or component unmount cleanup.
+
+```typescript
+import { TLDP } from '@tybrite-labs/tldp-sdk';
+
+const client = new TLDP({ apiKey: 'tybrite_sk_test_YOUR_KEY' });
+
+const promise = client.tracking.trackShipment({
+  trackingNumber: 'TLDP-20260608-0001',
+});
+
+// Cancel the request before it resolves
+promise.cancel();
+```
+
+`CancelablePromise` supports the full Promise interface — `.then()`, `.catch()`, `.finally()` — plus the `.cancel()` method.
+
+## Retry Behavior
+
+The SDK retries failed requests automatically so transient network errors and brief API unavailability do not require manual handling in your code.
+
+Retries are triggered on the following HTTP status codes: `429`, `500`, `502`, `503`, `504`. The SDK uses exponential backoff with jitter between attempts and respects the `Retry-After` header on `429 Too Many Requests` responses.
+
+Configure retry behavior in the constructor:
+
+```typescript
+import { TLDP } from '@tybrite-labs/tldp-sdk';
+
+const client = new TLDP({
+  apiKey: 'tybrite_sk_test_YOUR_KEY',
+  MAX_RETRIES: 4,       // Retry up to 4 times (default: 2)
+  RETRY_DELAY_MS: 1000, // Start backoff at 1 000 ms (default: 500)
+});
+```
+
+<Note>
+  Set `MAX_RETRIES: 0` to disable automatic retries entirely — for example, when you are managing retry logic yourself or running integration tests.
+</Note>
+
+## Idempotency
+
+For mutation requests such as `fulfilOrder` or `createShipment`, pass an `idempotencyKey` argument directly on the method call to safely retry without creating duplicate resources. Both methods accept `idempotencyKey` as a top-level parameter alongside `requestBody`.
+
+```typescript
+import { TLDP } from '@tybrite-labs/tldp-sdk';
+
+const client = new TLDP({ apiKey: 'tybrite_sk_test_YOUR_KEY' });
+
+const result = await client.orders.fulfilOrder({
+  orderId: 'ord_abc123',
+  idempotencyKey: 'a4f3c2d1-unique-uuid-here',
+  requestBody: { rate_quote_id: 'quote_xyz789' },
+});
+```
+
+<Tip>
+  Generate idempotency keys from a UUID v4 or a hash of the request parameters. Reuse the same key when retrying the exact same request; use a fresh key for logically different requests.
+</Tip>
+
+## Explore the Services
+
+<CardGroup cols={2}>
+  <Card title="Orders" icon="cart-shopping" href="/sdk/orders">
+    Create, fulfil, and manage orders through the full order lifecycle.
+  </Card>
+  <Card title="Shipments" icon="box" href="/sdk/shipments">
+    Create and manage shipments directly, bypassing the order layer.
+  </Card>
+  <Card title="Rates" icon="tags" href="/sdk/rates">
+    Fetch competitive courier quotes and list delivery zones.
+  </Card>
+  <Card title="Tracking" icon="location-dot" href="/sdk/tracking">
+    Track shipments in real time — public or detailed event history.
+  </Card>
+  <Card title="Returns" icon="rotate-left" href="/sdk/returns">
+    Request and manage the full returns and exchanges lifecycle.
+  </Card>
+  <Card title="Webhooks" icon="bell" href="/sdk/webhooks">
+    Subscribe to order, shipment, payment, and return events.
+  </Card>
+  <Card title="Proof of Delivery" icon="circle-check" href="/sdk/proof-of-delivery">
+    Retrieve photo, OTP, or signature proof for delivered shipments.
+  </Card>
+</CardGroup>

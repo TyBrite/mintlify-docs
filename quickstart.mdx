@@ -1,0 +1,112 @@
+---
+title: "TLDP Quickstart: Quote, Ship, and Track in 5 Steps"
+sidebarTitle: "Quickstart"
+description: "Install the TLDP SDK, initialise your client, quote delivery rates, create and fulfil an order, and track your shipment in one end-to-end walkthrough."
+---
+
+This guide walks you through a complete TLDP integration from scratch. By the end you will have installed the SDK, initialised a client with a test API key, fetched real-time rate quotes, created and fulfilled a shipment, and retrieved its live tracking status. All requests in this guide use a test key, so nothing real is booked and no money moves.
+
+<Steps>
+
+  <Step title="Install the SDK">
+    Add the `@tybrite-labs/tldp-sdk` package to your project using your preferred package manager.
+
+    <CodeGroup>
+      ```bash npm
+      npm install @tybrite-labs/tldp-sdk
+      ```
+
+      ```bash pnpm
+      pnpm add @tybrite-labs/tldp-sdk
+      ```
+
+      ```bash yarn
+      yarn add @tybrite-labs/tldp-sdk
+      ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Initialise the client">
+    Import `TLDP` and create a client instance. Pass your secret test key directly during initialisation. In production you should read this value from an environment variable rather than hard-coding it.
+
+    ```typescript
+    import { TLDP } from '@tybrite-labs/tldp-sdk';
+
+    const client = new TLDP({ apiKey: 'tybrite_sk_test_YOUR_KEY' });
+    ```
+  </Step>
+
+  <Step title="Quote a delivery">
+    Call `client.rates.calculateRates` with an origin, destination, weight, and service level. The response contains a ranked list of `quotes` from available carriers. Pick the first result — or present all options to your customer.
+
+    ```typescript
+    const { quotes } = await client.rates.calculateRates({
+      requestBody: {
+        origin: { city: 'Nairobi' },
+        destination: { city: 'Mombasa' },
+        weight_kg: 2.5,
+        service_level: 'standard',
+      },
+    });
+
+    const best = quotes[0];
+    console.log(best.courier_name, best.total_price);
+    ```
+  </Step>
+
+  <Step title="Create and fulfil an order">
+    First create an order with the recipient details and parcel information. Then call `fulfilOrder` with the order ID and the `quote_id` from the rate you selected. TLDP books the shipment with the carrier and returns a tracking number.
+
+    ```typescript
+    const { order } = await client.orders.createOrder({
+      requestBody: {
+        reference: 'ORDER-1042',
+        delivery_method: 'last_mile',
+        recipient: { name: 'Amina N.', phone: '+254700000000', city: 'Mombasa' },
+        item: { description: 'Books', weight_kg: 2.5 },
+      },
+    });
+
+    const fulfilled = await client.orders.fulfilOrder({
+      orderId: order.id,
+      requestBody: { rate_quote_id: best.quote_id },
+    });
+
+    console.log(fulfilled.tracking_number);
+    ```
+  </Step>
+
+  <Step title="Track your shipment">
+    Pass the tracking number returned by `fulfilOrder` to `client.tracking.trackShipment`. The `status` field progresses through `pending` → `picked_up` → `in_transit` → `delivered` as the carrier updates the shipment.
+
+    ```typescript
+    const status = await client.tracking.trackShipment({
+      trackingNumber: fulfilled.tracking_number,
+    });
+
+    console.log(status.status); // pending → picked_up → in_transit → delivered
+    ```
+  </Step>
+
+</Steps>
+
+<Note>
+  The `quote_id` field on each object in the `quotes` array (Step 3) maps directly to `rate_quote_id` in the `fulfilOrder` request body (Step 4). Always capture `best.quote_id` before moving on to order creation.
+</Note>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="key" href="/authentication">
+    Learn about secret vs publishable keys, test vs live environments, and how to rotate your credentials safely.
+  </Card>
+  <Card title="Webhooks" icon="webhook" href="/guides/webhooks">
+    Subscribe to real-time shipment events instead of polling the tracking endpoint on a schedule.
+  </Card>
+  <Card title="SDK Guide" icon="npm" href="/sdk/introduction">
+    Explore the full TypeScript SDK reference — every method, parameter, and response type, with examples.
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/introduction">
+    Browse the complete REST API reference if you prefer raw HTTP calls or are integrating from a non-Node.js environment.
+  </Card>
+</CardGroup>

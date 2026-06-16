@@ -1,0 +1,105 @@
+---
+title: "Manage Returns and Exchanges with TLDP"
+sidebarTitle: "Returns"
+description: "Handle the complete returns lifecycle — from customer request through approval, physical receipt, and final resolution — using the TLDP API and TypeScript SDK."
+---
+
+TLDP supports the full returns and exchanges lifecycle from initial customer request through to final resolution. Whether a customer received the wrong item, changed their mind, or received a damaged parcel, you can record the return, route it through an approval workflow, confirm physical receipt, and close it out with a refund, exchange, repair, or store credit — all through the API.
+
+## Return lifecycle
+
+A return moves through four sequential states. Each transition is triggered by an explicit API call.
+
+| State | Meaning |
+|---|---|
+| `requested` | The customer has initiated a return; awaiting merchant review |
+| `approved` | The merchant has accepted the return; the customer can send the item back |
+| `rejected` | The merchant has declined the return request |
+| `received` | The returned item has physically arrived at the warehouse or merchant |
+| `resolved` | The return has been closed with the chosen resolution (refund, exchange, etc.) |
+
+## Return reasons
+
+Pass one of the following values as the `reason` field when requesting a return.
+
+| Value | Description |
+|---|---|
+| `damaged_in_transit` | The item was damaged during delivery |
+| `defective` | The item has a manufacturing defect |
+| `wrong_item` | The customer received an item they did not order |
+| `not_as_described` | The item does not match its product listing |
+| `changed_mind` | The customer no longer wants the item |
+| `other` | Any reason not covered by the above categories |
+
+## Return resolutions
+
+Pass one of the following values as the `resolution` field when approving a return. The resolution you specify is the outcome applied when the return reaches the `resolved` state.
+
+| Value | Description |
+|---|---|
+| `refund` | Issue a monetary refund to the customer |
+| `exchange` | Send a replacement item to the customer |
+| `repair` | Repair and return the original item |
+| `store_credit` | Apply a credit to the customer's account |
+| `reject` | Reject the return after physical inspection |
+
+## Full returns lifecycle
+
+<Steps>
+  <Step title="Request a return">
+    Create a return record by providing the originating order ID, the reason, and the list of items being returned.
+
+    ```typescript
+    const { return: returnRecord } = await client.returns.requestReturn({
+      requestBody: {
+        order_id: 'ord_7f3a91',
+        reason: 'wrong_item',
+        items: [
+          { name: 'Blue T-Shirt (M)', quantity: 1, sku: 'SKU-001' },
+        ],
+      },
+    });
+    console.log(returnRecord.id);
+    ```
+  </Step>
+
+  <Step title="Approve or reject the return">
+    Review the return request and either approve it — specifying the resolution to apply — or reject it. Approving creates a reverse pickup shipment from the customer back to you.
+
+    ```typescript
+    await client.returns.approveReturn({
+      returnId: returnRecord.id,
+      requestBody: { resolution: 'exchange' },
+    });
+    // or
+    await client.returns.rejectReturn({ returnId: returnRecord.id });
+    ```
+  </Step>
+
+  <Step title="Mark the return as received">
+    Once the item physically arrives at your location, mark the return as received to progress it to the next state.
+
+    ```typescript
+    await client.returns.receiveReturn({ returnId: returnRecord.id });
+    ```
+  </Step>
+
+  <Step title="Resolve the return">
+    Close the return by resolving it. TLDP applies the resolution specified at approval time (for example, issuing a refund or dispatching an exchange).
+
+    ```typescript
+    await client.returns.resolveReturn({ returnId: returnRecord.id });
+    ```
+
+    You can check the current state of a return at any point using `getReturn`.
+
+    ```typescript
+    const ret = await client.returns.getReturn({ returnId: returnRecord.id });
+    console.log(ret.status);
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+  Subscribe to return webhook events — `return.requested`, `return.approved`, `return.rejected`, `return.received`, `return.refunded`, and `return.exchanged` — to receive realtime notifications at each stage of the lifecycle without polling. See the [Webhooks guide](/guides/webhooks) to get started.
+</Tip>

@@ -1,0 +1,159 @@
+---
+title: "Rates, Quotes, and Service Levels in TLDP"
+sidebarTitle: "Rates & Service Levels"
+description: "Learn how to fetch competitive courier quotes, compare service levels and courier tiers, and lock in a price before fulfilling an order."
+---
+
+When you call `calculateRates`, TLDP fans out the request to every courier enabled on your account and returns a ranked list of quotes for the given route, weight, and service level. Each quote is a binding price that you can use directly to fulfil an order — no renegotiation happens at fulfilment time. This design lets you present accurate cost options to your customers or run automated courier selection logic without worrying about price drift.
+
+## Service Levels
+
+Service levels control the speed tier of the delivery. Pass a `service_level` value when requesting quotes to filter results to a specific tier, or omit it to receive quotes across all available tiers at once.
+
+| Service Level | Description |
+|---|---|
+| `economy` | Lowest-cost option with relaxed transit times. Best for non-urgent, lightweight parcels. |
+| `standard` | The default balanced option. Reliable transit times at competitive rates for most shipments. |
+| `express` | Faster than standard, with priority handling at sorting facilities. |
+| `same_day` | Delivery within the same calendar day. Available on selected city-to-city routes. |
+| `overnight` | Guaranteed next-business-day delivery. Premium pricing; ideal for time-critical documents and goods. |
+
+## Courier Tiers
+
+Courier tier reflects the quality and reliability band of the assigned carrier. Use tiers to match your service promise to your customers' expectations.
+
+| Courier Tier | Description |
+|---|---|
+| `bronze` | Competitively priced carriers best suited for economy and standard shipments where cost is the primary concern. |
+| `silver` | Mid-tier carriers with a solid track record of on-time delivery and responsive support. |
+| `gold` | Premium carriers with the highest reliability ratings, real-time tracking fidelity, and dedicated customer support. |
+
+## The Quote Object
+
+Every item in the `quotes` array returned by `calculateRates` contains the following key fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `quote_id` | `string` | Unique identifier for this quote. Pass this as `rate_quote_id` when fulfilling. |
+| `courier_name` | `string` | Human-readable name of the courier. |
+| `courier_tier` | `string` | `bronze`, `silver`, or `gold`. |
+| `service_level` | `string` | The service level this quote covers (e.g. `standard`). |
+| `total_price` | `number` | All-in price in the smallest currency unit (e.g. cents). |
+| `currency` | `string` | ISO 4217 currency code (e.g. `KES`, `NGN`, `GHS`). |
+| `breakdown` | `object` | Itemised cost breakdown — see below. |
+| `valid_until` | `string` | ISO 8601 timestamp after which this quote expires and can no longer be used to fulfil. |
+
+## Price Breakdown
+
+The `breakdown` object on each quote gives you full transparency into how the `total_price` was calculated:
+
+| Breakdown Field | Description |
+|---|---|
+| `base_rate` | The courier's flat base charge for the route. |
+| `weight_surcharge` | Additional charge applied when the parcel exceeds the courier's base weight threshold. |
+| `zone_addon` | Extra fee for deliveries that cross pricing zone boundaries. |
+| `service_multiplier` | A multiplier applied to the courier subtotal for higher service levels (e.g. `express`, `same_day`). |
+| `special_surcharges` | Any situational charges such as remote area fees, fuel surcharges, or peak-period levies. |
+| `courier_subtotal` | Sum of all courier-side charges before the TLDP platform fee. |
+| `platform_fee` | TLDP's fee for routing, rate negotiation, and support. Included in `total_price`. |
+
+<Note>
+The `quote_id` returned in the rates response maps directly to the `rate_quote_id` field you supply when calling `fulfilOrder` or `createShipment`. Always use the exact `quote_id` string — do not reconstruct or modify it.
+</Note>
+
+## Fetching Quotes: TypeScript Example
+
+```typescript
+import { TLDP } from '@tybrite-labs/tldp-sdk';
+
+const client = new TLDP({ apiKey: 'tybrite_sk_live_…' });
+
+const { quotes } = await client.rates.calculateRates({
+  requestBody: {
+    origin: { city: 'Nairobi' },
+    destination: { city: 'Mombasa' },
+    weight_kg: 2.5,
+    service_level: 'standard',
+  },
+});
+
+// Inspect the first quote
+const quote = quotes[0];
+console.log(`${quote.courier_name} (${quote.courier_tier})`);
+console.log(`Total: ${quote.currency} ${quote.total_price}`);
+console.log(`Valid until: ${quote.valid_until}`);
+console.log('Breakdown:', quote.breakdown);
+```
+
+## Selecting and Using a Quote
+
+Once you have the `quote_id`, pass it as `rate_quote_id` to lock in the price at fulfilment time:
+
+```typescript
+// Fulfil an order using the chosen quote
+const { shipment_id, tracking_number } = await client.orders.fulfilOrder({
+  orderId: 'ord_abc123',
+  requestBody: {
+    rate_quote_id: quote.quote_id, // from the calculateRates response
+  },
+});
+
+console.log(tracking_number);
+```
+
+<Warning>
+Quotes expire at `valid_until` — **2 minutes after creation**. If you attempt to fulfil with an expired `quote_id`, the API returns a `422 Unprocessable Entity` error with code `quote_expired`. Call `calculateRates` again to obtain a fresh quote.
+</Warning>
+
+## Discovering Delivery Zones
+
+TLDP's pricing uses a zone system to account for inter-regional routing costs. Use `listZones` to discover all available origin and destination zones before building your rate-fetching logic:
+
+```typescript
+import { TLDP } from '@tybrite-labs/tldp-sdk';
+
+const client = new TLDP({ apiKey: 'tybrite_sk_live_…' });
+
+const { zones } = await client.rates.listZones();
+
+zones.forEach((zone) => {
+  console.log(`${zone.name} — ${zone.country_code} (zone_id: ${zone.id})`);
+});
+```
+
+<Tip>
+Pass `zone_id` values in your rates request instead of free-text city names when you need deterministic routing. Zone IDs are stable identifiers, whereas city-name matching uses fuzzy search that may resolve differently as coverage expands.
+</Tip>
+
+## Comparing Quotes Across Tiers
+
+Use the following pattern to group quotes by tier and surface the cheapest option in each:
+
+```typescript
+import { TLDP } from '@tybrite-labs/tldp-sdk';
+
+const client = new TLDP({ apiKey: 'tybrite_sk_live_…' });
+
+const { quotes } = await client.rates.calculateRates({
+  requestBody: {
+    origin: { city: 'Nairobi' },
+    destination: { city: 'Mombasa' },
+    weight_kg: 2.5,
+    // omit service_level to get all tiers
+  },
+});
+
+const byTier = quotes.reduce(
+  (acc, q) => {
+    if (!acc[q.courier_tier] || q.total_price < acc[q.courier_tier].total_price) {
+      acc[q.courier_tier] = q;
+    }
+    return acc;
+  },
+  {} as Record<string, (typeof quotes)[number]>,
+);
+
+console.log('Cheapest bronze:', byTier.bronze?.total_price);
+console.log('Cheapest silver:', byTier.silver?.total_price);
+console.log('Cheapest gold:  ', byTier.gold?.total_price);
+```

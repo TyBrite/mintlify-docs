@@ -1,0 +1,188 @@
+---
+title: "Orders and Shipments: TLDP Data Model Explained"
+sidebarTitle: "Orders & Shipments"
+description: "Learn how TLDP separates commercial intent (orders) from physical delivery (shipments) and when to use each resource in your integration."
+---
+
+In TLDP, **orders** and **shipments** are distinct resources that model two different stages of a delivery workflow. An order captures the commercial intent — what needs to be delivered, to whom, and at what price — while a shipment is the physical manifestation of that intent, complete with a tracking number and an assigned courier. Understanding the boundary between the two lets you build flexible fulfilment flows, whether you want the full order lifecycle or a direct shipment creation path.
+
+## The Order-to-Shipment Flow
+
+Creating an order does not immediately dispatch a courier. Fulfilment is a deliberate second step, giving you time to validate, quote, and confirm before committing to a delivery.
+
+<Steps>
+  <Step title="Create an order">
+    Call `POST /v1/orders` (or `client.orders.createOrder`) with the recipient details, item description, and delivery method. The order enters the `pending_fulfilment` state.
+  </Step>
+  <Step title="Get a rate quote">
+    Call `POST /v1/rates/calculate` to retrieve competitive quotes for the order's route, weight, and service level. Select the quote that best fits your cost and speed requirements. Save the `quote_id` from the response.
+  </Step>
+  <Step title="Fulfil the order">
+    Call `POST /v1/orders/{id}/fulfil` with your chosen `rate_quote_id`. TLDP creates a shipment, assigns a courier, and returns a tracking number. The order moves to the `fulfilled` state.
+  </Step>
+  <Step title="Track the shipment">
+    Use the returned `tracking_number` to monitor delivery progress through the tracking endpoints or webhooks.
+  </Step>
+</Steps>
+
+## Order States
+
+| State | Description |
+|---|---|
+| `pending_fulfilment` | The order has been recorded but not yet fulfilled. No courier is assigned. |
+| `fulfilled` | A shipment has been created from the order. A tracking number exists. |
+| `cancelled` | The order was cancelled before or after fulfilment. Any associated shipment that has not yet been picked up is also cancelled. |
+
+## Delivery Methods
+
+When creating an order, you specify a `delivery_method` that determines how the recipient receives their parcel.
+
+<CardGroup cols={2}>
+  <Card title="last_mile" icon="truck">
+    A courier collects the parcel from your origin and delivers it directly to the recipient's door address. Use this when your customer expects home or office delivery without travelling to collect.
+  </Card>
+  <Card title="station_pickup" icon="building">
+    The parcel is transported to the nearest TLDP-affiliated pickup station. The recipient receives a notification and collects at their convenience. Typically lower cost and suitable when door delivery isn't practical.
+  </Card>
+</CardGroup>
+
+## On-Demand Fulfilment
+
+For time-sensitive flows, use on-demand fulfilment to dispatch directly to nearby independent drivers without a separate rates call. TLDP offers four on-demand tiers:
+
+| Tier | Description |
+|---|---|
+| `express` | Dedicate a trip now (same-city only, highest fare). |
+| `on_the_way` | A driver already heading in the right direction carries it — cheapest option. |
+| `scheduled` | Flexible window; the parcel rides along a trip. Default tier. |
+| `driver_rate_card` | Use a specific driver's own posted rate. |
+
+<Tabs>
+  <Tab title="Two-step (recommended)">
+    ```typescript
+    import { TLDP } from '@tybrite-labs/tldp-sdk';
+
+    const client = new TLDP({ apiKey: 'tybrite_sk_live_…' });
+
+    // Step 1 — Get a quote
+    const { quotes } = await client.rates.calculateRates({
+      requestBody: {
+        origin: { city: 'Nairobi' },
+        destination: { city: 'Mombasa' },
+        weight_kg: 2.5,
+        service_level: 'standard',
+      },
+    });
+
+    const bestQuote = quotes[0]; // pick the quote that fits your criteria
+
+    // Step 2 — Fulfil the order with the chosen quote
+    const { shipment_id, tracking_number } = await client.orders.fulfilOrder({
+      orderId: 'ord_abc123',
+      requestBody: {
+        rate_quote_id: bestQuote.quote_id,
+      },
+    });
+    ```
+  </Tab>
+  <Tab title="On-demand (one step)">
+    ```typescript
+    import { TLDP } from '@tybrite-labs/tldp-sdk';
+
+    const client = new TLDP({ apiKey: 'tybrite_sk_live_…' });
+
+    // Dispatch directly to nearby on-demand drivers
+    const { tracking_number, tier, fare } = await client.orders.fulfilOrderOnDemand({
+      orderId: 'ord_abc123',
+      requestBody: {
+        tier: 'express',
+      },
+    });
+
+    console.log(tracking_number); // ready immediately
+    console.log(`${tier} tier — fare: ${fare}`);
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+On-demand fulfilment broadcasts an offer to matching online drivers at the chosen tier — the first driver to accept picks it up. The price is locked in atomically, so you will never see a quote expire between selection and fulfilment.
+</Note>
+
+## TypeScript Examples
+
+### Creating an order
+
+```typescript
+import { TLDP } from '@tybrite-labs/tldp-sdk';
+
+const client = new TLDP({ apiKey: 'tybrite_sk_live_…' });
+
+const { order } = await client.orders.createOrder({
+  requestBody: {
+    reference: 'ORDER-1042',
+    delivery_method: 'last_mile',
+    recipient: {
+      name: 'Amina N.',
+      phone: '+254700000000',
+      address: '14 Mama Ngina St',
+      city: 'Mombasa',
+    },
+    item: {
+      description: 'Books',
+      weight_kg: 2.5,
+    },
+  },
+});
+
+console.log(order.id);     // ord_…
+console.log(order.status); // pending_fulfilment
+```
+
+### Creating a shipment directly
+
+```typescript
+import { TLDP } from '@tybrite-labs/tldp-sdk';
+
+const client = new TLDP({ apiKey: 'tybrite_sk_live_…' });
+
+const { shipment } = await client.shipments.createShipment({
+  requestBody: {
+    rate_quote_id: 'quote_abc123',
+    recipient: {
+      name: 'Amina N.',
+      phone: '+254700000000',
+      address: '14 Mama Ngina St',
+      city: 'Mombasa',
+    },
+    parcel: {
+      description: 'Books',
+      weight_kg: 2.5,
+    },
+  },
+});
+
+console.log(shipment.tracking_number); // TLDP-…
+console.log(shipment.status);          // pending
+```
+
+## Order Flow vs. Direct Shipment Creation
+
+Use the right path for your integration needs:
+
+<Accordion title="When to use the order flow">
+  Choose the order flow (`POST /v1/orders` → fulfil) when:
+
+  - Your platform has a commerce layer and you want to record the buyer's intent before committing to a courier
+  - You need to present rate options to the sender or customer before confirming
+  - You want order-level state tracking (`pending_fulfilment`, `fulfilled`, `cancelled`) alongside shipment tracking
+  - You may need to cancel before fulfilment without having dispatched a courier
+</Accordion>
+
+<Accordion title="When to create a shipment directly">
+  Use `POST /v1/shipments` directly when:
+
+  - You already have a pre-selected rate quote and want to minimise round-trips
+  - You are building a backend automation that doesn't need order-level state — for example, bulk label generation
+  - You are migrating from another logistics API and mapping directly to shipment objects fits your existing data model
+</Accordion>

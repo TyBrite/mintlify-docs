@@ -1,0 +1,84 @@
+---
+title: "ProofOfDeliveryService: Get Proof of Delivery | TLDP"
+sidebarTitle: "Proof of Delivery"
+description: "Use client.proofOfDelivery to retrieve photo, OTP, or signature proof of delivery records once a shipment reaches delivered status."
+---
+
+`client.proofOfDelivery` retrieves proof of delivery (POD) records once a shipment has been successfully delivered. POD records are created by the courier at the point of delivery and contain verified evidence — such as a delivery photo, a signed OTP confirmation, or a captured signature — that the parcel reached the intended recipient. Use POD data to resolve delivery disputes, satisfy compliance requirements, or present delivery confirmation to your customers.
+
+<Note>
+  Proof of delivery is only available after a shipment's status reaches `delivered`. Calling `getProofOfDelivery` on a shipment in any earlier status returns a `404` error. OTP codes are never returned in the response.
+</Note>
+
+## Methods
+
+### `getProofOfDelivery`
+
+Retrieve the proof of delivery record for a delivered shipment. Provide the internal shipment ID to look up the associated POD.
+
+<ParamField query="shipmentId" type="string" required>
+  The internal shipment ID (e.g. `shp_abc123`). This is available in the shipment object as the `id` field.
+</ParamField>
+
+```typescript
+import { TLDP } from '@tybrite-labs/tldp-sdk';
+
+const client = new TLDP({ apiKey: 'tybrite_sk_live_YOUR_SECRET_KEY' });
+
+const pod = await client.proofOfDelivery.getProofOfDelivery({
+  shipmentId: 'shp_abc123',
+});
+
+console.log(pod.shipment_id);      // 'shp_abc123'
+console.log(pod.tracking_number);  // 'TLDP-20260608-0001'
+console.log(pod.delivered_at);     // '2026-06-08T14:32:00Z'
+console.log(pod.pod.type);         // 'photo' | 'otp' | 'signature'
+console.log(pod.pod.verified_at);  // '2026-06-08T14:32:05Z'
+console.log(pod.pod.data);         // proof payload (URL, OTP string, or signature data)
+```
+
+---
+
+## Response Fields
+
+<ResponseField name="shipment_id" type="string">
+  The internal ID of the shipment this proof of delivery belongs to.
+</ResponseField>
+
+<ResponseField name="tracking_number" type="string">
+  The public tracking number of the delivered shipment.
+</ResponseField>
+
+<ResponseField name="delivered_at" type="string | null">
+  ISO 8601 timestamp of when the shipment was marked as delivered by the courier.
+</ResponseField>
+
+<ResponseField name="pod" type="object">
+  The proof of delivery record captured at the point of delivery.
+
+  <Expandable title="pod fields">
+    <ResponseField name="pod.type" type="'photo' | 'otp' | 'signature'">
+      The type of proof captured by the courier. See the [POD types table](#pod-types) below.
+    </ResponseField>
+
+    <ResponseField name="pod.verified_at" type="string | null">
+      ISO 8601 timestamp of when the proof was captured and verified by the courier app.
+    </ResponseField>
+
+    <ResponseField name="pod.data" type="object">
+      The proof payload. Contents vary by type — for `photo` this is a URL to the delivery image; for `otp` this is the confirmed one-time passcode; for `signature` this is the captured signature data.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+## POD Types
+
+The courier captures one of three proof types at the point of delivery, depending on the courier's capabilities and the delivery configuration.
+
+| Type | Value | Description |
+|---|---|---|
+| Photo | `photo` | The courier photographs the delivered parcel at the drop-off location. The `pod.data` field contains a URL to the image. |
+| OTP | `otp` | The recipient confirms receipt by providing a one-time passcode sent to their phone. OTP codes are never returned in the response — `pod.data` confirms the verified event. |
+| Signature | `signature` | The recipient signs on the courier's device. The `pod.data` field contains the captured signature data. |

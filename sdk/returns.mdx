@@ -1,0 +1,198 @@
+---
+title: "ReturnsService: Handle Returns and Exchanges | TLDP"
+sidebarTitle: "Returns"
+description: "Use client.returns to request, approve, receive, and resolve returns and exchanges through the full TLDP reverse-logistics lifecycle."
+---
+
+`client.returns` manages the complete lifecycle of returns and exchanges for delivered orders. You begin by requesting a return against a specific order, specifying the reason. The return then progresses through a series of lifecycle transitions — approval (where you choose the resolution), receipt, and resolution — each of which you trigger explicitly via dedicated methods.
+
+## Methods
+
+### `requestReturn`
+
+Open a return request against a delivered order. Specify the reason for the return and optionally include a customer note and the specific line items being returned. Emits a `return.requested` webhook.
+
+<Note>
+  The response wraps the return object under the key `return`, which is a reserved word in JavaScript. Alias it on destructuring: `const { return: ret } = ...`.
+</Note>
+
+<ParamField body="order_id" type="string" required>
+  The ID of the delivered order for which you are requesting a return.
+</ParamField>
+
+<ParamField body="reason" type="ReturnReason" required>
+  The reason for the return. See the [Return Reasons table](#return-reasons) for all valid values.
+</ParamField>
+
+<ParamField body="customer_note" type="string">
+  An optional note from the customer describing the issue. Optional.
+</ParamField>
+
+<ParamField body="items" type="ReturnItemInput[]">
+  The specific line items being returned (partial returns supported). Each item accepts `name`, `quantity`, `sku`, `order_item_id`, `unit_price`, and `condition`. Optional — omit to return the whole order.
+</ParamField>
+
+```typescript
+import { TLDP } from '@tybrite-labs/tldp-sdk';
+
+const client = new TLDP({ apiKey: 'tybrite_sk_test_YOUR_KEY' });
+
+const { return: ret } = await client.returns.requestReturn({
+  requestBody: {
+    order_id: 'ord_abc123',
+    reason: 'wrong_item',
+    customer_note: 'Received blue, ordered red',
+    items: [
+      {
+        name: 'Blue T-Shirt (M)',
+        quantity: 1,
+        sku: 'SKU-001',
+      },
+    ],
+  },
+});
+
+console.log(ret.id);     // 'ret_abc123'
+console.log(ret.status); // 'requested'
+```
+
+---
+
+### `listReturns`
+
+Retrieve all return records associated with your account.
+
+```typescript
+const { returns } = await client.returns.listReturns();
+
+returns.forEach((ret) => {
+  console.log(ret.id, ret.status, ret.reason);
+});
+```
+
+---
+
+### `getReturn`
+
+Retrieve the current state of a return by its ID, including its status, reason, resolution, and associated items.
+
+```typescript
+const ret = await client.returns.getReturn({ returnId: 'ret_abc123' });
+
+console.log(ret.id);
+console.log(ret.status);     // e.g. 'approved'
+console.log(ret.reason);     // e.g. 'wrong_item'
+```
+
+---
+
+### `approveReturn`
+
+Approve a return that is in the `requested` state and choose the resolution. Approval creates a reverse pickup shipment (customer → merchant). Emits a `return.approved` webhook.
+
+<ParamField body="resolution" type="ReturnResolution" required>
+  The resolution to apply. See the [Return Resolutions table](#return-resolutions) for all valid values.
+</ParamField>
+
+<ParamField body="merchant_note" type="string">
+  An optional internal note explaining the approval decision. Optional.
+</ParamField>
+
+```typescript
+const result = await client.returns.approveReturn({
+  returnId: 'ret_abc123',
+  requestBody: {
+    resolution: 'refund',
+    merchant_note: 'Approved — defect confirmed',
+  },
+});
+
+console.log(result.status);              // 'approved'
+console.log(result.reverse_shipment_id); // ID of the reverse pickup shipment
+```
+
+**Returns** `{ return_id, status, reverse_shipment_id }`.
+
+---
+
+### `rejectReturn`
+
+Reject a return request. Use this when the return does not meet your policy criteria. The return moves to `rejected` status and no further lifecycle transitions are available.
+
+```typescript
+const result = await client.returns.rejectReturn({
+  returnId: 'ret_abc123',
+  requestBody: { merchant_note: 'Outside the 14-day return window' }, // optional
+});
+
+console.log(result.status); // 'rejected'
+```
+
+---
+
+### `receiveReturn`
+
+Mark a return as received — confirming that the item has arrived back at your warehouse or fulfilment centre. The return moves to `received` status and is ready for resolution. Emits a `return.received` webhook.
+
+```typescript
+const result = await client.returns.receiveReturn({ returnId: 'ret_abc123' });
+
+console.log(result.status); // 'received'
+```
+
+---
+
+### `resolveReturn`
+
+Settle a received return by applying the resolution chosen at approval. For `refund`, the customer is refunded and the liable party's settled cut is clawed back via the payout ledger. For `exchange`, a replacement shipment is dispatched. Emits `return.refunded` or `return.exchanged`. This is the final lifecycle step.
+
+<Warning>
+  Resolve only after the item is **received** — resolving issues the financial outcome (e.g. a refund). Order the steps correctly: approve → receive → resolve.
+</Warning>
+
+<ParamField body="restock" type="boolean">
+  Set to `true` to flag the returned items to be restocked into inventory. Optional.
+</ParamField>
+
+```typescript
+const result = await client.returns.resolveReturn({
+  returnId: 'ret_abc123',
+  requestBody: { restock: true }, // optional
+});
+
+console.log(result.status);                  // 'resolved'
+console.log(result.resolution);              // e.g. 'refund'
+console.log(result.refund_amount);           // amount refunded, or null
+console.log(result.replacement_shipment_id); // set for 'exchange', otherwise null
+```
+
+**Returns** `{ return_id, status, resolution, refund_amount, replacement_shipment_id }`.
+
+---
+
+## Return Reasons
+
+Use one of the following lowercase string values for the `reason` field when calling `requestReturn`.
+
+| Value | Description |
+|---|---|
+| `damaged_in_transit` | The item arrived damaged due to handling during delivery |
+| `defective` | The item is faulty or does not function as expected |
+| `wrong_item` | The customer received a different item to the one they ordered |
+| `not_as_described` | The item does not match the product description or images |
+| `changed_mind` | The customer no longer wants the item (buyer's remorse) |
+| `other` | A reason not covered by the above categories |
+
+---
+
+## Return Resolutions
+
+Use one of the following lowercase string values for the `resolution` field when calling `approveReturn`.
+
+| Value | Description |
+|---|---|
+| `refund` | A monetary refund is issued to the customer's original payment method |
+| `exchange` | The item is replaced with an equivalent or alternative product |
+| `repair` | The item is sent for repair and returned to the customer |
+| `store_credit` | Credit is added to the customer's account for future purchases |
+| `reject` | The return request is rejected and no remediation is applied |

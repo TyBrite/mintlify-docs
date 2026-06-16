@@ -1,0 +1,118 @@
+---
+title: "API Keys and Environments in TLDP"
+sidebarTitle: "Keys & Environments"
+description: "Understand TLDP's secret and publishable key types, how test and live environments differ, and how to keep your credentials secure."
+---
+
+Every API key in TLDP carries two dimensions of identity: **permissions** (what the key can do) and **environment** (which data it touches). Secret keys grant full read/write access and must stay on your backend, while publishable keys are intentionally limited to read operations so you can embed them safely in client-side code. Separately, each key belongs to either the test environment or the live environment, determining whether your requests move real money and trigger real courier workflows.
+
+## Key Types
+
+| Key Type | Prefix | Access | Use From |
+|---|---|---|---|
+| Secret key | `tybrite_sk_live_…` / `tybrite_sk_test_…` | Read + Write | Backend only (server-side) |
+| Publishable key | `tybrite_pk_live_…` / `tybrite_pk_test_…` | Read-only | Client-safe (frontend, mobile) |
+
+<Warning>
+Never expose your secret key in client-side code, public repositories, or environment variables that ship with a frontend bundle. Anyone who obtains your secret key can create shipments, read order data, and modify your account. If you suspect a key has been compromised, roll it immediately — see [Rolling a Leaked Key](#rolling-a-leaked-key) below.
+</Warning>
+
+## Test vs. Live Environments
+
+TLDP provides two fully isolated environments so you can build and validate your integration without touching production data.
+
+**Test environment**
+- Uses keys prefixed with `_test_` (e.g. `tybrite_sk_test_…`)
+- All API responses include `"Tybrite-Environment: sandbox"` in the response headers
+- No real money moves and no real courier jobs are dispatched
+- Sandbox shipments, orders, and quotes are completely separate from live data
+- Rate limits are lower: **30 requests per minute** per API key
+
+**Live environment**
+- Uses keys prefixed with `_live_` (e.g. `tybrite_sk_live_…`)\
+- All API responses include `"Tybrite-Environment: production"` in the response headers
+- Real payments are processed and real courier workflows are triggered
+- Rate limits: **120 requests per minute** per API key
+
+<Tip>
+Every TLDP API response includes a `Tybrite-Environment` header set to `production` or `sandbox`. Check this header during development to confirm that your key resolved to the environment you intended before you go further in a request flow.
+</Tip>
+
+## Confirming Your Environment
+
+Inspect the response headers on any API call to verify which environment is active:
+
+```http
+HTTP/1.1 200 OK
+Tybrite-Environment: sandbox
+Content-Type: application/json
+```
+
+In the TypeScript SDK, initialise the client with the appropriate key. Use a test key during development and a live key in production:
+
+```typescript
+import { TLDP } from '@tybrite-labs/tldp-sdk';
+
+// Test environment — no real money or couriers
+const client = new TLDP({ apiKey: 'tybrite_sk_test_…' });
+
+const { order } = await client.orders.createOrder({
+  requestBody: {
+    reference: 'TEST-001',
+    delivery_method: 'last_mile',
+    recipient: {
+      name: 'Amina N.',
+      phone: '+254700000000',
+      address: '14 Mama Ngina St',
+      city: 'Mombasa',
+    },
+    item: { description: 'Books', weight_kg: 2.5 },
+  },
+});
+
+console.log(order.id);     // ord_…
+console.log(order.status); // pending_fulfilment
+```
+
+## Rolling a Leaked Key
+
+If a secret key is ever exposed — committed to a repository, logged to an external service, or shared inadvertently — roll it immediately. Rolling issues a new key and permanently invalidates the old one.
+
+<Steps>
+  <Step title="Open the Dashboard">
+    Navigate to **Settings → API Keys** in the TLDP Dashboard.
+  </Step>
+  <Step title="Identify the Compromised Key">
+    Locate the key you need to invalidate. You can identify it by its last four characters or its creation timestamp.
+  </Step>
+  <Step title="Click Roll Key">
+    Select **Roll** next to the key. TLDP immediately revokes the old key and generates a replacement with the same environment and permissions.
+  </Step>
+  <Step title="Update Your Configuration">
+    Replace the old key value in every environment where it was set (CI secrets, server environment variables, secret managers) before your next deployment.
+  </Step>
+  <Step title="Verify Traffic">
+    Monitor your API logs for any `401 Unauthorized` responses that indicate a service still using the revoked key.
+  </Step>
+</Steps>
+
+<Warning>
+Rolling a key is irreversible. The old key stops working the instant you confirm the roll. Make sure you have the new key stored securely before dismissing the Dashboard dialog — TLDP only shows the full key value once.
+</Warning>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Separate keys per service" icon="key">
+    Issue a distinct API key for each backend service or deployment environment. This limits blast radius if a key leaks and lets you roll one service without affecting others.
+  </Card>
+  <Card title="Use environment variables" icon="terminal">
+    Store keys in environment variables or a secrets manager (e.g. AWS Secrets Manager, HashiCorp Vault). Never hard-code key values in source files.
+  </Card>
+  <Card title="Restrict key usage in the Dashboard" icon="shield">
+    Where possible, scope keys to specific IP ranges or API endpoints using the key restrictions panel in **Settings → API Keys**.
+  </Card>
+  <Card title="Audit key usage regularly" icon="chart-bar">
+    Review the **API Logs** in the Dashboard periodically to spot unexpected usage patterns that could indicate an unauthorised caller.
+  </Card>
+</CardGroup>

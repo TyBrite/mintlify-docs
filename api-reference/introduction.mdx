@@ -1,0 +1,136 @@
+---
+title: "TLDP REST API Reference: Endpoints and Conventions"
+sidebarTitle: "Overview"
+description: "Explore the TLDP REST API at api.tybritelabs.com/v1 — base URL, authentication, JSON conventions, idempotency, error codes, and rate limits."
+---
+
+The TLDP REST API is available at `https://api.tybritelabs.com/v1` and gives you programmatic access to every logistics capability on the platform — from calculating shipping rates and creating orders to tracking shipments and managing returns. Interactive endpoint pages are listed in the sidebar under this tab; this page covers the conventions, authentication model, error format, and rate limits that apply across all endpoints.
+
+## Base URL
+
+Every request targets the following base URL. The version segment (`/v1`) is part of the path, and breaking changes will ship under a new version rather than in-place.
+
+```
+https://api.tybritelabs.com/v1
+```
+
+## Authentication
+
+Authenticate by sending your API key as a Bearer token in the `Authorization` header on every request.
+
+```bash
+Authorization: Bearer tybrite_sk_live_...
+```
+
+TLDP issues two families of keys. Secret keys (`tybrite_sk_live_…` and `tybrite_sk_test_…`) carry full read/write access and must only be used from your backend. Publishable keys (`tybrite_pk_live_…` and `tybrite_pk_test_…`) are read-only and safe to embed in client-side code. See the [Authentication guide](/authentication) for details on creating and rotating keys.
+
+<Warning>
+  Never expose a secret key in a browser, mobile app, or public repository. Use publishable keys for any client-facing integration.
+</Warning>
+
+## Conventions
+
+### JSON everywhere
+
+All request bodies must be sent as JSON with the `Content-Type: application/json` header. All responses — including errors — are returned as JSON.
+
+```bash
+curl https://api.tybritelabs.com/v1/rates/calculate \
+  -H "Authorization: Bearer tybrite_sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{"origin":{"city":"Nairobi"},"destination":{"city":"Mombasa"},"weight_kg":2.5}'
+```
+
+### Idempotency
+
+Include an `Idempotency-Key` header on state-creating `POST` requests to safely retry without creating duplicate resources. Use a unique value per logical operation — a UUID works well. If you replay a request with the same key but a different body, the API returns `409 Conflict`.
+
+```bash
+Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000
+```
+
+<Tip>
+  Generate a fresh UUID for each new operation and store it alongside your request so you can replay it exactly if a network error occurs before you receive a response.
+</Tip>
+
+### API versioning
+
+The current API version is `v1`, reflected in every endpoint path. When TLDP introduces breaking changes, they are released under a new version path (e.g. `/v2`) so your existing integrations remain unaffected until you choose to migrate.
+
+## Errors
+
+All error responses share a consistent JSON structure, making it straightforward to handle failures uniformly across your integration.
+
+```json
+{
+  "error": {
+    "code": "not_found",
+    "message": "Order not found"
+  }
+}
+```
+
+The `code` field is a machine-readable string you can match against in your error-handling logic; `message` is a human-readable description intended for debugging.
+
+### HTTP status codes
+
+| Status | Meaning |
+|--------|---------|
+| `400` | Invalid request — a required field is missing or a value is malformed |
+| `401` | Missing or invalid API key |
+| `403` | The key lacks permission for this operation |
+| `404` | The requested resource does not exist |
+| `409` | Conflict — e.g. an idempotency key replay with a different request body |
+| `422` | Request understood but cannot be processed in its current state |
+| `429` | Rate limit exceeded — back off and retry |
+| `5xx` | Transient server error — safe to retry with exponential backoff |
+
+<Note>
+  `5xx` errors are safe to retry. Use exponential backoff with jitter to avoid amplifying load during incidents.
+</Note>
+
+## Rate limits
+
+TLDP enforces per-key and per-IP rate limits to ensure fair usage across all integrations.
+
+| Scope | Limit |
+|-------|-------|
+| Production — per API key | 120 requests / minute |
+| Sandbox — per API key | 30 requests / minute |
+| Public tracking endpoint — per IP | 60 requests / minute |
+
+When you exceed a limit, the API responds with `429 Too Many Requests`. Inspect the `X-RateLimit-*` response headers to determine your remaining quota and when the window resets before retrying.
+
+```
+X-RateLimit-Limit: 120
+X-RateLimit-Remaining: 0
+X-RateLimit-Reset: 1720000860
+```
+
+## API resources
+
+Each resource area has a dedicated SDK reference page with full method signatures, parameter descriptions, and code examples.
+
+<CardGroup cols={2}>
+  <Card title="Rates" icon="tag" href="/sdk/rates">
+    Calculate shipping rates and retrieve zone configurations for origin–destination pairs.
+  </Card>
+  <Card title="Orders" icon="box" href="/sdk/orders">
+    Create, update, fulfil, cancel, and query orders across your logistics workflows.
+  </Card>
+  <Card title="Shipments" icon="truck" href="/sdk/shipments">
+    Book shipments against confirmed orders and manage their lifecycle end-to-end.
+  </Card>
+  <Card title="Tracking" icon="map-pin" href="/sdk/tracking">
+    Retrieve real-time tracking events by tracking number or shipment ID.
+  </Card>
+  <Card title="Returns" icon="arrow-u-up-left" href="/sdk/returns">
+    Initiate, approve, receive, and resolve return requests from your customers.
+  </Card>
+  <Card title="Proof of Delivery" icon="file-check" href="/sdk/proof-of-delivery">
+    Retrieve signed proof-of-delivery records — photo, OTP, or signature — for delivered shipments.
+  </Card>
+  <Card title="Webhooks" icon="webhook" href="/sdk/webhooks">
+    Register endpoints to receive push notifications for shipment and order events.
+  </Card>
+</CardGroup>

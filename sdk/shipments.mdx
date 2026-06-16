@@ -1,0 +1,169 @@
+---
+title: "ShipmentsService: Create and Manage Shipments | TLDP"
+sidebarTitle: "Shipments"
+description: "Use client.shipments to create, retrieve, and cancel shipments directly — ideal for B2B, bulk, or headless workflows that skip the order layer."
+---
+
+`client.shipments` lets you create shipments directly without going through the order lifecycle. This is useful for B2B workflows, bulk operations, or any integration where you already know the rate quote you want to use and do not need the order abstraction layer. The service also provides retrieval and cancellation of individual shipments.
+
+<Note>
+  Creating a shipment directly requires a valid `rate_quote_id`. Obtain one by calling `client.rates.calculateRates()` before calling `createShipment`. See the [Rates](/sdk/rates) page for details.
+</Note>
+
+## Methods
+
+### `createShipment`
+
+Create a shipment by supplying a rate quote ID along with recipient and parcel details. On success, the API returns a shipment object with a tracking number and a tracking URL you can share with your customer. Send an `idempotencyKey` to make retries safe — a repeated key returns the original shipment instead of creating a duplicate.
+
+<Note>
+  Each rate quote exposes its id as `quote_id`. Pass that value as `rate_quote_id` here — read `quote.quote_id`, send it as `rate_quote_id`.
+</Note>
+
+<ParamField body="rate_quote_id" type="string" required>
+  The quote ID returned by `client.rates.calculateRates()`. Quotes expire 2 minutes after creation — check the `valid_until` field and re-quote if expired.
+</ParamField>
+
+<ParamField body="recipient" type="Address" required>
+  The delivery recipient. Requires `name`, `phone`, and `city` at minimum. Provide `address` for more precise routing.
+</ParamField>
+
+<ParamField body="sender" type="Address">
+  The sender's details. Optional — defaults to your account's registered address.
+</ParamField>
+
+<ParamField body="parcel" type="Parcel">
+  Physical details of the shipment. Include `weight_kg` and dimensions for accurate handling and pricing. Optional.
+</ParamField>
+
+<ParamField body="payment" type="object">
+  Payment method and reference. Optional.
+</ParamField>
+
+<ParamField body="options" type="object">
+  Delivery options such as `pod_type`, `signature_required`, and `insurance`. Optional.
+</ParamField>
+
+<ParamField body="metadata" type="object">
+  Arbitrary key-value pairs to attach to the shipment for your own record-keeping. Optional.
+</ParamField>
+
+```typescript
+import { TLDP } from '@tybrite-labs/tldp-sdk';
+
+const client = new TLDP({ apiKey: 'tybrite_sk_test_YOUR_KEY' });
+
+const { quotes } = await client.rates.calculateRates({
+  requestBody: {
+    origin: { city: 'Nairobi' },
+    destination: { city: 'Mombasa' },
+    weight_kg: 2.5,
+  },
+});
+const chosen = quotes[0];
+
+const { shipment } = await client.shipments.createShipment({
+  idempotencyKey: `ship-${Date.now()}`,
+  requestBody: {
+    rate_quote_id: chosen.quote_id, // read quote_id, send as rate_quote_id
+    recipient: {
+      name: 'Amina N.',
+      phone: '+254700000000',
+      city: 'Mombasa',
+    },
+    parcel: {
+      description: 'Books',
+      weight_kg: 2.5,
+    },
+  },
+});
+
+console.log(shipment.tracking_number); // 'TLDP-20260608-0001'
+console.log(shipment.tracking_url);    // 'https://track.tybritelabs.com/...'
+console.log(shipment.status);          // 'pending'
+```
+
+<Tip>
+  Always pass an `idempotencyKey` — on a transient network failure the SDK can retry safely and you'll get the original shipment back instead of a duplicate booking.
+</Tip>
+
+---
+
+### `getShipment`
+
+Retrieve the current state of a shipment by its ID. The response includes the full shipment object with status, pricing, timeline, and tracking information.
+
+<ResponseField name="id" type="string">
+  The unique shipment ID.
+</ResponseField>
+
+<ResponseField name="tracking_number" type="string">
+  The public tracking number in `TLDP-YYYYMMDD-XXXX` format.
+</ResponseField>
+
+<ResponseField name="status" type="ShipmentStatus">
+  The current shipment status. See the [ShipmentStatus values](/sdk/tracking#shipment-status-values) for the full list.
+</ResponseField>
+
+<ResponseField name="service_level" type="ServiceLevel">
+  The service level assigned to this shipment (e.g. `standard`, `express`).
+</ResponseField>
+
+<ResponseField name="tracking_url" type="string">
+  A shareable URL for public shipment tracking. Safe to send to end customers.
+</ResponseField>
+
+<ResponseField name="recipient" type="Address">
+  The recipient details provided at creation time.
+</ResponseField>
+
+<ResponseField name="pricing" type="object">
+  Pricing breakdown including `total` amount charged and `currency`.
+</ResponseField>
+
+<ResponseField name="timeline" type="object">
+  Key timestamps: `created_at`, `picked_up_at`, `delivered_at`, and `estimated_delivery`.
+</ResponseField>
+
+```typescript
+const { shipment } = await client.shipments.getShipment({ shipmentId: 'shp_abc123' });
+
+console.log(shipment.id);              // 'shp_abc123'
+console.log(shipment.tracking_number); // 'TLDP-20260608-0001'
+console.log(shipment.status);          // e.g. 'in_transit'
+console.log(shipment.service_level);   // e.g. 'standard'
+console.log(shipment.tracking_url);    // shareable tracking link
+```
+
+---
+
+### `cancelShipment`
+
+Cancel a shipment before it is picked up by the courier. Once a shipment reaches `picked_up` or a later status, cancellation is no longer available and the request is rejected (409). Provide an optional `reason` for your records.
+
+<Warning>
+  You cannot cancel a shipment that has already been picked up, is in transit, or has been delivered. Check the `status` field before calling `cancelShipment` to avoid an error.
+</Warning>
+
+```typescript
+await client.shipments.cancelShipment({
+  shipmentId: 'shp_abc123',
+  requestBody: { reason: 'duplicate_booking' }, // optional
+});
+```
+
+---
+
+## Parcel Fields
+
+When creating a shipment, pass a `Parcel` object to the `parcel` property. All fields are optional, but providing accurate dimensions and weight ensures the correct rate is applied.
+
+| Field | Type | Description |
+|---|---|---|
+| `description` | `string` | A brief description of the parcel contents |
+| `weight_kg` | `number` | Gross weight of the parcel in kilograms |
+| `length_cm` | `number` | Length of the parcel in centimetres |
+| `width_cm` | `number` | Width of the parcel in centimetres |
+| `height_cm` | `number` | Height of the parcel in centimetres |
+| `declared_value` | `number` | Declared monetary value of the contents (used for insurance) |
+| `fragile` | `boolean` | Set to `true` to flag the parcel for careful handling |

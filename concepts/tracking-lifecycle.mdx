@@ -1,0 +1,162 @@
+---
+title: "Shipment Tracking Lifecycle and Status Events"
+sidebarTitle: "Tracking Lifecycle"
+description: "Understand every shipment status in TLDP, how to track deliveries in real time, and the difference between public and detailed tracking."
+---
+
+Every shipment created through TLDP progresses through a defined sequence of statuses, from the moment a courier is assigned right through to final delivery. You can observe this progression in real time using either the tracking API or webhooks, and you can choose between a lightweight public endpoint (safe for customer-facing pages) and a detailed backend endpoint that returns the full event history with timestamps and locations.
+
+## Shipment Status Lifecycle
+
+A shipment moves forward through the following statuses under normal conditions. Two terminal failure states — `cancelled` and `failed` — can occur at any point if the delivery cannot be completed.
+
+| Status | Meaning |
+|---|---|
+| `pending` | The shipment has been created but payment has not yet been confirmed and no courier has been assigned. |
+| `payment_confirmed` | Payment for the shipment has been verified. The shipment is queued for courier assignment. |
+| `assigned` | A courier has accepted the job. Collection from the origin is scheduled. |
+| `picked_up` | The courier has collected the parcel from the origin address or drop-off point. |
+| `in_transit` | The parcel is moving through the courier's network toward the destination. |
+| `out_for_delivery` | The courier is on a route that includes this parcel and delivery is imminent. |
+| `delivered` | The parcel has been successfully handed to the recipient. This is the normal terminal state. |
+| `cancelled` | The shipment was cancelled before or during transit. No further status updates will be issued. |
+| `failed` | The delivery attempt could not be completed (e.g. recipient unreachable, address invalid). Contact support or retry fulfilment. |
+
+```
+pending → payment_confirmed → assigned → picked_up → in_transit → out_for_delivery → delivered
+                                                  ↘ cancelled
+                                                  ↘ failed
+```
+
+## Two Ways to Track a Shipment
+
+TLDP provides two tracking endpoints to suit different use cases. Choose based on who is making the request and how much detail they need.
+
+<CardGroup cols={2}>
+  <Card title="Public Tracking" icon="globe">
+    No authentication required — or pass your **publishable key** for higher trust. Returns a `PublicTracking` object with recipient name, courier, estimated delivery, and an event timeline. Designed for embedding in customer-facing tracking pages.
+  </Card>
+  <Card title="Detailed Tracking" icon="lock">
+    Uses your **secret key**. Returns a full `TrackingEvent[]` array with precise timestamps, status codes, human-readable descriptions, and location data. Designed for backend monitoring and ops dashboards.
+  </Card>
+</CardGroup>
+
+### Public tracking response fields (`PublicTracking`)
+
+| Field | Description |
+|---|---|
+| `tracking_number` | The shipment's unique tracking identifier. |
+| `status` | Current shipment status value (e.g. `in_transit`). |
+| `estimated_delivery` | ISO 8601 date-time of the projected delivery window. |
+| `recipient` | Recipient's name and city only (no address or phone — privacy-safe for public display). |
+| `courier` | Name of the assigned courier. |
+| `events` | Array of tracking events in reverse-chronological order. |
+
+### Detailed tracking event fields (`TrackingEvent`)
+
+| Field | Description |
+|---|---|
+| `timestamp` | ISO 8601 date-time of when the event occurred. |
+| `status` | Shipment status value at the time of the event (e.g. `picked_up`). |
+| `description` | Human-readable description of the event (e.g. `"Parcel arrived at Mombasa sorting hub"`). |
+| `location` | Geographic location string where the event was recorded (e.g. `"Mombasa, Kenya"`). |
+
+## TypeScript Examples
+
+<Tabs>
+  <Tab title="Public Tracking">
+    The public tracking endpoint is unauthenticated — no key is required. You may optionally pass a publishable key if you want to use the SDK client you already have initialised.
+
+    ```typescript
+    import { TLDP } from '@tybrite-labs/tldp-sdk';
+
+    // Publishable key is safe to use in a browser or mobile app
+    const publicClient = new TLDP({
+      apiKey: 'tybrite_pk_live_…',
+    });
+
+    const tracking = await publicClient.tracking.trackShipment({
+      trackingNumber: 'TLDP-20251003-0001',
+    });
+
+    console.log(`Status: ${tracking.status}`);
+    console.log(`Estimated delivery: ${tracking.estimated_delivery}`);
+    console.log(`Courier: ${tracking.courier?.name}`);
+
+    tracking.events.forEach((event) => {
+      console.log(`[${event.status}] ${event.description}`);
+    });
+    ```
+  </Tab>
+  <Tab title="Detailed Tracking">
+    Use your secret key server-side for full event detail with timestamps and locations.
+
+    ```typescript
+    import { TLDP } from '@tybrite-labs/tldp-sdk';
+
+    // Secret key — backend only
+    const client = new TLDP({
+      apiKey: 'tybrite_sk_live_…',
+    });
+
+    const { events } = await client.tracking.getShipmentTracking({
+      shipmentId: 'shp_abc123',
+    });
+
+    events.forEach((event) => {
+      console.log(`${event.timestamp}  [${event.status}]`);
+      console.log(`  ${event.description}`);
+      console.log(`  Location: ${event.location}`);
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Handling Terminal States
+
+When a shipment reaches `cancelled` or `failed`, no further status transitions will occur. Build your integration to handle these states explicitly:
+
+```typescript
+import { TLDP } from '@tybrite-labs/tldp-sdk';
+
+const client = new TLDP({ apiKey: 'tybrite_sk_live_…' });
+
+const { events } = await client.tracking.getShipmentTracking({
+  shipmentId: 'shp_abc123',
+});
+
+const latestEvent = events[0]; // events are returned newest-first
+
+switch (latestEvent.status) {
+  case 'delivered':
+    // Mark order as complete in your system
+    break;
+  case 'failed':
+    // Alert your ops team and consider re-fulfilment
+    console.error(`Delivery failed at ${latestEvent.location}: ${latestEvent.description}`);
+    break;
+  case 'cancelled':
+    // Refund or re-route as appropriate
+    break;
+  default:
+    // Shipment is still in progress
+    break;
+}
+```
+
+<Tip>
+Use **webhooks** instead of polling the tracking endpoints for real-time status updates. Webhooks push a `shipment.status_updated` event to your endpoint the moment a status transition occurs — no polling interval lag, and no wasted API quota. See the [Webhooks guide](/guides/webhooks) to configure your endpoint.
+</Tip>
+
+## Rate Limits for the Tracking Endpoints
+
+Keep these limits in mind when building tracking UI or bulk monitoring scripts:
+
+| Endpoint | Limit |
+|---|---|
+| `trackShipment` (public) | **60 requests per minute per IP address** |
+| `getShipmentTracking` (detailed, secret key) | **120 req/min** (live) / **30 req/min** (sandbox) per API key |
+
+<Warning>
+The public tracking endpoint enforces a per-IP rate limit rather than a per-key limit. If you are proxying customer tracking requests through your own server, all requests will share your server's IP allocation. Consider caching the last-known status for a short TTL (e.g. 30 seconds) to stay well within the limit during traffic spikes.
+</Warning>

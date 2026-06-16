@@ -1,0 +1,63 @@
+---
+title: "TLDP API Authentication: Keys, Environments, and Security"
+sidebarTitle: "Authentication"
+description: "TLDP uses Bearer API keys to authenticate every request. Understand key types, test vs live environments, and how to pass credentials securely."
+---
+
+TLDP authenticates every API request using a Bearer token passed in the `Authorization` header. Your API key encodes two pieces of information at once: the **permissions** granted to the key (read-only or read/write) and the **environment** the key targets (sandbox or production). There are no sessions or cookies — each request is independently authenticated.
+
+## Key types
+
+Choose the right key type for each context. Using a key with more permissions than necessary is a security risk.
+
+| Key type         | Prefix                                        | Access       | Use from          |
+|------------------|-----------------------------------------------|--------------|-------------------|
+| Secret key       | `tybrite_sk_live_…` / `tybrite_sk_test_…`     | Read + write | Server-side only  |
+| Publishable key  | `tybrite_pk_live_…` / `tybrite_pk_test_…`     | Read-only    | Client-side safe  |
+
+<Warning>
+  Never expose a secret key in a browser, mobile app, or any client-side code. Secret keys carry full read/write access to your account. If a secret key is compromised, rotate it immediately from the Tybrite dashboard and update all server-side references.
+</Warning>
+
+## Test vs live environments
+
+The middle segment of every key — `test` or `live` — determines which environment your requests target.
+
+- **Test keys** (`tybrite_sk_test_…`, `tybrite_pk_test_…`) run against the sandbox environment. No real shipments are booked, no money moves, and all events carry `livemode: false`. Use test keys throughout development and CI.
+- **Live keys** (`tybrite_sk_live_…`, `tybrite_pk_live_…`) target the production environment. Requests create real shipments, charge real payment methods, and dispatch real couriers. Only use live keys once your integration is ready for production traffic.
+
+Switching environments is as simple as swapping the key — the API surface is identical in both environments. Every response also includes a header confirming which environment your key resolved to, so you can assert in tests that you are calling the right one.
+
+## Sending your API key
+
+Pass your key as a Bearer token in the `Authorization` header of every request. The examples below show how to do this with cURL and with the TypeScript SDK.
+
+<CodeGroup>
+  ```bash cURL
+  curl https://api.tybritelabs.com/v1/rates/calculate \
+    -H "Authorization: Bearer tybrite_sk_test_..." \
+    -H "Content-Type: application/json" \
+    -d '{"origin":{"city":"Nairobi"},"destination":{"city":"Mombasa"},"weight_kg":2.5}'
+  ```
+
+  ```typescript TypeScript SDK
+  import { TLDP } from '@tybrite-labs/tldp-sdk';
+
+  const client = new TLDP({ apiKey: 'tybrite_sk_test_YOUR_KEY' });
+
+  // Every subsequent call on `client` automatically includes
+  // Authorization: Bearer tybrite_sk_test_YOUR_KEY
+  const { quotes } = await client.rates.calculateRates({
+    requestBody: {
+      origin: { city: 'Nairobi' },
+      destination: { city: 'Mombasa' },
+      weight_kg: 2.5,
+      service_level: 'standard',
+    },
+  });
+  ```
+</CodeGroup>
+
+<Tip>
+  Use test keys for the entire development and staging lifecycle — they are functionally identical to live keys but completely isolated from production. Only swap in your live keys at the final step before going to production, and always load them from environment variables rather than hard-coding them in source files.
+</Tip>

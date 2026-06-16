@@ -1,0 +1,249 @@
+---
+title: "OrdersService: Create and Fulfil Orders | TLDP SDK"
+sidebarTitle: "Orders"
+description: "Use client.orders to create, update, fulfil, and cancel orders — including on-demand fulfilment and real-time courier quotes via the TLDP SDK."
+---
+
+`client.orders` is the primary service for the order-based fulfilment flow. You create an order to capture recipient details and item information, retrieve a rate quote, then fulfil the order to convert it into a live shipment. The service also supports on-demand fulfilment, which dispatches directly to nearby independent riders for same-city deliveries.
+
+## Methods
+
+### `createOrder`
+
+Create a new order with a recipient, item details, and a delivery method. The order starts in a `pending_fulfilment` state until you fulfil it with a rate quote.
+
+<ParamField body="reference" type="string">
+  Your internal reference for this order (e.g. your e-commerce order ID). Optional.
+</ParamField>
+
+<ParamField body="delivery_method" type="'last_mile' | 'station_pickup'">
+  The delivery method. Use `last_mile` to deliver to the recipient's address, or `station_pickup` for collection at a pickup station. Optional.
+</ParamField>
+
+<ParamField body="recipient" type="object" required>
+  Recipient contact and location details. Requires `name`, `phone`, and `city` at minimum. Optionally include `email`, `address`, `lat`, and `lng`.
+</ParamField>
+
+<ParamField body="item" type="object">
+  The parcel summary used for the shipment. Provide at least `description` and `weight_kg` for accurate rate quotes. Optional.
+</ParamField>
+
+<ParamField body="items" type="OrderItemInput[]">
+  Cart line items. Each item records the product details for auditing across the platform. Optional.
+</ParamField>
+
+<ParamField body="origin" type="object">
+  The pickup origin. Defaults to your account's registered origin if omitted. Optional.
+</ParamField>
+
+```typescript
+import { TLDP } from '@tybrite-labs/tldp-sdk';
+
+const client = new TLDP({ apiKey: 'tybrite_sk_test_YOUR_KEY' });
+
+const { order } = await client.orders.createOrder({
+  requestBody: {
+    reference: 'ORDER-1042',
+    delivery_method: 'last_mile',
+    recipient: {
+      name: 'Amina N.',
+      phone: '+254700000000',
+      city: 'Mombasa',
+    },
+    item: {
+      description: 'Books',
+      weight_kg: 2.5,
+    },
+  },
+});
+
+console.log(order.id);     // 'ord_abc123'
+console.log(order.status); // 'pending_fulfilment'
+```
+
+---
+
+### `listOrders`
+
+Retrieve all orders associated with your account.
+
+```typescript
+const { orders } = await client.orders.listOrders();
+
+orders.forEach((order) => {
+  console.log(order.id, order.reference, order.status);
+});
+```
+
+---
+
+### `getOrder`
+
+Retrieve a single order by its ID, including its current status, recipient, items, and (once fulfilled) its linked shipment.
+
+```typescript
+const { order } = await client.orders.getOrder({ orderId: 'ord_abc123' });
+
+console.log(order.status);
+console.log(order.reference);
+```
+
+---
+
+### `updateOrder`
+
+Update mutable fields on a pending order — such as the reference, recipient details, delivery method, or item information. Passing `items[]` replaces all existing line items. Updates are rejected (409) once an order has been fulfilled.
+
+```typescript
+const { order } = await client.orders.updateOrder({
+  orderId: 'ord_abc123',
+  requestBody: {
+    reference: 'NEW-REF-1042',
+    recipient: {
+      name: 'Amina N.',
+      phone: '+254700000000',
+      city: 'Nairobi',
+    },
+  },
+});
+
+console.log(order.reference); // 'NEW-REF-1042'
+```
+
+---
+
+### `cancelOrder`
+
+Cancel a pending order. If a shipment exists but has not yet been picked up, it is cancelled too. If the shipment is already in transit, the request is rejected (409). Emits an `order.cancelled` webhook.
+
+```typescript
+const result = await client.orders.cancelOrder({
+  orderId: 'ord_abc123',
+  requestBody: { reason: 'customer_changed_mind' }, // optional
+});
+
+console.log(result.order_id, result.status); // 'cancelled'
+```
+
+---
+
+### `fulfilOrder`
+
+Fulfil a pending order using a rate quote ID obtained from `client.rates.calculateRates()`. This converts the order into a live shipment and assigns it to a courier. Emits an `order.fulfilled` webhook.
+
+<Note>
+  Each quote from `calculateRates` exposes its id as `quote_id`. Pass that value as `rate_quote_id` here. Read `quote.quote_id`, send it as `rate_quote_id`.
+</Note>
+
+<ParamField body="rate_quote_id" type="string" required>
+  The quote ID obtained from `client.rates.calculateRates()`. Quotes expire after 2 minutes — re-quote if `valid_until` has passed.
+</ParamField>
+
+<ParamField body="pickup_point_id" type="string">
+  First-mile pickup point (merchant → courier). Optional.
+</ParamField>
+
+<ParamField body="delivery_method" type="'last_mile' | 'station_pickup'">
+  Override the delivery method set on the order. Optional.
+</ParamField>
+
+<ParamField body="delivery_station_id" type="string">
+  Last-mile or pickup station (courier → customer). Drives the last-mile fee. Optional.
+</ParamField>
+
+```typescript
+const { quotes } = await client.rates.calculateRates({
+  requestBody: {
+    origin: { city: 'Nairobi' },
+    destination: { city: 'Mombasa' },
+    weight_kg: 2.5,
+  },
+});
+const chosen = quotes[0];
+
+const result = await client.orders.fulfilOrder({
+  orderId: 'ord_abc123',
+  idempotencyKey: `fulfil-ord_abc123-${Date.now()}`,
+  requestBody: {
+    rate_quote_id: chosen.quote_id, // read quote_id, send as rate_quote_id
+  },
+});
+
+console.log(result.tracking_number); // 'TLDP-20260608-0001'
+console.log(result.tracking_url);
+console.log(result.shipment_id);
+```
+
+<Tip>
+  Pass an `idempotencyKey` so a network retry cannot accidentally create two shipments for one order — a repeated key returns the original result.
+</Tip>
+
+**Returns** `{ order_id, shipment_id, tracking_number, tracking_url }`.
+
+---
+
+### `onDemandQuote`
+
+Fetch on-demand delivery tier quotes for a specific order. Returns available tiers — such as `express`, `on_the_way`, and `scheduled` — with their fare, estimated arrival time, and eligibility for the order's corridor.
+
+```typescript
+const { tiers } = await client.orders.onDemandQuote({ orderId: 'ord_abc123' });
+
+for (const t of tiers) {
+  if (t.eligible) {
+    console.log(t.tier, t.fare, `${t.eta_min} min`);
+  } else {
+    console.log(t.tier, 'unavailable:', t.reason);
+  }
+}
+```
+
+**Returns** `{ tiers: [{ tier, eligible, reason?, fare?, eta_min? }] }`.
+
+---
+
+### `fulfilOrderOnDemand`
+
+Dispatch an order to nearby on-demand drivers at a chosen tier. Creates the shipment at the tier fare and broadcasts an offer to matching online drivers — the first to accept picks it up. Emits an `order.fulfilled` webhook.
+
+<ParamField body="tier" type="OnDemandTier">
+  The on-demand delivery tier. See the [On-Demand Tiers table](#on-demand-tiers) below. Optional — omit to use the platform default.
+</ParamField>
+
+```typescript
+const result = await client.orders.fulfilOrderOnDemand({
+  orderId: 'ord_abc123',
+  idempotencyKey: `ondemand-ord_abc123-${Date.now()}`,
+  requestBody: {
+    tier: 'express',
+  },
+});
+
+console.log(result.tracking_number);
+console.log(result.tracking_url);
+console.log(result.tier);    // 'express'
+console.log(result.fare);    // fare in account currency
+console.log(result.offers);  // number of drivers offered the delivery
+```
+
+**Returns** `{ order_id, shipment_id, tracking_number, tracking_url, fulfilment, tier, fare, offers }`.
+
+---
+
+## Delivery Methods
+
+| Method | Value | Description |
+|---|---|---|
+| Last Mile | `last_mile` | Courier delivers directly to the recipient's address (base + station last-mile fee) |
+| Station Pickup | `station_pickup` | Recipient collects their parcel from a designated pickup station (base fee only) |
+
+## On-Demand Tiers
+
+When using `fulfilOrderOnDemand`, pass one of the following tier values. Tiers are only eligible when the merchant has enabled on-demand delivery and the corridor supports it. Pricing is flat per corridor, not per-km.
+
+| Tier | Value | Description |
+|---|---|---|
+| Express | `express` | Dedicate a trip now — same-city only, fastest but priciest |
+| On the Way | `on_the_way` | A driver already heading that way carries it — cheapest option |
+| Scheduled | `scheduled` | Flexible delivery window; parcel rides along a planned trip |
+| Driver Rate Card | `driver_rate_card` | Fulfilment at the driver's own published rate |

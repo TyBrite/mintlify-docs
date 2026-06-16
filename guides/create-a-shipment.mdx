@@ -1,0 +1,129 @@
+---
+title: "Create and Track a Shipment with TLDP"
+sidebarTitle: "Create a Shipment"
+description: "Step-by-step guide to quoting, creating, and tracking a shipment via the order flow or directly using the TLDP REST API and TypeScript SDK."
+---
+
+TLDP gives you two paths to create a shipment: the **order flow**, which lets you create an order first and fulfil it later, and **direct shipment creation**, which is ideal when you already have all the details ready. Both paths begin with fetching a rate quote — the quote ID anchors every shipment to a confirmed price.
+
+<Tabs>
+  <Tab title="Via Orders">
+    <Steps>
+      <Step title="Get a rate quote">
+        Calculate rates for your origin, destination, and parcel weight. The first result in the `quotes` array is the best available rate.
+
+        ```typescript
+        const { quotes } = await client.rates.calculateRates({
+          requestBody: {
+            origin: { city: 'Nairobi' },
+            destination: { city: 'Mombasa' },
+            weight_kg: 2.5,
+            service_level: 'standard',
+          },
+        });
+        const best = quotes[0]; // best.quote_id is passed as rate_quote_id below
+        ```
+      </Step>
+
+      <Step title="Create an order">
+        Create an order with your internal reference, delivery method, recipient details, and item information.
+
+        ```typescript
+        const { order } = await client.orders.createOrder({
+          requestBody: {
+            reference: 'ORDER-1042',
+            delivery_method: 'last_mile',
+            recipient: { name: 'Amina N.', phone: '+254700000000', address: '12 Biashara St', city: 'Mombasa' },
+            item: { description: 'Books', weight_kg: 2.5 },
+          },
+        });
+        ```
+      </Step>
+
+      <Step title="Fulfil the order">
+        Attach your chosen rate quote to the order to create a shipment and generate a tracking number.
+
+        ```typescript
+        const fulfilled = await client.orders.fulfilOrder({
+          orderId: order.id,
+          requestBody: { rate_quote_id: best.quote_id },
+        });
+        console.log(fulfilled.tracking_number);
+        ```
+      </Step>
+
+      <Step title="Track the shipment">
+        Use the `tracking_number` returned from fulfilment to monitor your shipment's progress, or subscribe to [webhook events](/guides/webhooks) for push notifications.
+      </Step>
+    </Steps>
+  </Tab>
+
+  <Tab title="Direct Shipment">
+    <Steps>
+      <Step title="Get a rate quote">
+        Fetch available rates for your route and parcel. Save the `quote_id` from the best option.
+
+        ```typescript
+        const { quotes } = await client.rates.calculateRates({
+          requestBody: {
+            origin: { city: 'Nairobi' },
+            destination: { city: 'Mombasa' },
+            weight_kg: 2.5,
+            service_level: 'standard',
+          },
+        });
+        const best = quotes[0];
+        ```
+      </Step>
+
+      <Step title="Create the shipment directly">
+        Pass the `rate_quote_id`, recipient, and parcel details to create a shipment without an intermediate order record.
+
+        ```typescript
+        const { shipment } = await client.shipments.createShipment({
+          requestBody: {
+            rate_quote_id: best.quote_id,
+            recipient: { name: 'Amina N.', phone: '+254700000000', address: '12 Biashara St', city: 'Mombasa' },
+            parcel: { description: 'Books', weight_kg: 2.5 },
+          },
+        });
+        console.log(shipment.tracking_number);
+        ```
+      </Step>
+
+      <Step title="Track the shipment">
+        The `tracking_number` in the response is your reference for all downstream tracking and proof-of-delivery queries.
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+## Parcel fields
+
+Include any of the following fields in the `parcel` object to describe your shipment accurately. Dimensional fields are used to calculate volumetric weight where applicable.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `description` | string | No | Short description of the parcel contents |
+| `weight_kg` | number | No | Actual weight of the parcel in kilograms |
+| `length_cm` | number | No | Length of the parcel in centimetres |
+| `width_cm` | number | No | Width of the parcel in centimetres |
+| `height_cm` | number | No | Height of the parcel in centimetres |
+| `declared_value` | number | No | Declared monetary value for insurance purposes |
+| `fragile` | boolean | No | Flags the parcel for careful handling |
+
+<Note>
+  Send an `Idempotency-Key` header on all write requests — such as `createShipment` or `createOrder` — to safely retry on network failures without creating duplicate shipments. Use a unique value per logical operation (for example, a UUID generated client-side).
+</Note>
+
+## Cancel a shipment
+
+If you need to cancel a shipment before it is picked up, call `cancelShipment` with the shipment ID.
+
+```typescript
+await client.shipments.cancelShipment({ shipmentId: shipment.id });
+```
+
+<Tip>
+  Instead of polling the API for status updates, subscribe to [webhook events](/guides/webhooks) such as `shipment.picked_up`, `shipment.in_transit`, and `shipment.delivered`. Your server receives a push notification the moment each status change occurs.
+</Tip>

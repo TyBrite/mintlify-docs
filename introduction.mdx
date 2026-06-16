@@ -1,0 +1,56 @@
+---
+title: "TLDP: Africa's Unified Logistics Developer Platform"
+sidebarTitle: "Introduction"
+description: "TLDP gives you a single REST API and TypeScript SDK to quote rates, create shipments, track deliveries, and manage returns across African courier networks."
+---
+
+TLDP (Tybrite Logistics Developer Platform) is a unified logistics API that connects your application to multiple African courier networks through a single integration. Instead of maintaining separate integrations for each carrier, you send one request to TLDP and it handles carrier selection, label generation, tracking aggregation, and returns — so you can focus on building your product rather than wiring up logistics infrastructure.
+
+## What you can build
+
+<CardGroup cols={2}>
+  <Card title="Rates" icon="tag" href="/sdk/rates">
+    Compare real-time delivery quotes across carriers. Filter by price, speed, or service level and present the best option to your customers.
+  </Card>
+  <Card title="Orders & Shipments" icon="box" href="/sdk/orders">
+    Create orders, select a rate quote, and fulfil shipments in two API calls. TLDP generates the label and books the pickup automatically.
+  </Card>
+  <Card title="Tracking" icon="location-dot" href="/sdk/tracking">
+    Poll or subscribe to live shipment status updates — from `pending` through `picked_up`, `in_transit`, and all the way to `delivered`.
+  </Card>
+  <Card title="Returns" icon="rotate-left" href="/sdk/returns">
+    Initiate and manage return shipments with the same unified interface, keeping your reverse-logistics flow consistent with your outbound flow.
+  </Card>
+</CardGroup>
+
+## Two ways to integrate
+
+Choose the integration style that fits your stack. Both the REST API and the TypeScript SDK expose the same capabilities — pick whichever feels natural.
+
+<CardGroup cols={2}>
+  <Card title="REST API" icon="code" href="/api-reference/introduction">
+    Send standard HTTP requests with a Bearer token. Works with any language or HTTP client. Ideal when you need fine-grained control or are working outside of a Node.js environment.
+  </Card>
+  <Card title="TypeScript SDK" icon="npm" href="/sdk/introduction">
+    Install the `@tybrite-labs/tldp-sdk` package and get fully typed methods, auto-completion, and built-in error handling. The fastest way to go from zero to a working integration.
+  </Card>
+</CardGroup>
+
+## Base URL
+
+Every REST API request is made to the following base URL. All endpoints are versioned under `/v1`.
+
+```bash
+https://api.tybritelabs.com/v1
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install the SDK, make your first rate quote, and track a shipment end-to-end in under five minutes.
+  </Card>
+  <Card title="Authentication" icon="key" href="/authentication">
+    Understand API key types, test vs live environments, and how to pass your credentials securely.
+  </Card>
+</CardGroup>
